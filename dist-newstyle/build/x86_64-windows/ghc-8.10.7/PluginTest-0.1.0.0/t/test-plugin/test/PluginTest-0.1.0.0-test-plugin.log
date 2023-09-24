@@ -1,0 +1,4 @@
+Test suite test-plugin: RUNNING...
+Hello, World!
+Test suite test-plugin: PASS
+Test suite logged to: C:\Users\Alexander\Desktop\PluginTest\dist-newstyle\build\x86_64-windows\ghc-8.10.7\PluginTest-0.1.0.0\t\test-plugin\test\PluginTest-0.1.0.0-test-plugin.log
