@@ -2,6 +2,15 @@ module PluginTest (plugin) where
 import GHC.Plugins
 import Data.Maybe (fromMaybe)
 
+data PrintOptions = PrintOptions { indentation :: Int, indentationString :: String }
+
+incInden :: PrintOptions -> PrintOptions
+incInden printOptions = PrintOptions (indentation printOptions + 1) (indentationString printOptions)
+
+makeIndentation :: PrintOptions -> String
+makeIndentation printOptions =
+  replicate (indentation printOptions) (indentationString printOptions) >>= id
+
 plugin :: Plugin
 plugin = defaultPlugin {
     installCoreToDos = install
@@ -14,67 +23,106 @@ install _ todo = do
 pass :: ModGuts -> CoreM ModGuts
 pass guts = do dflags <- getDynFlags
                bindsOnlyPass (mapM (printBind dflags)) guts
-  where printBind :: DynFlags -> CoreBind -> CoreM CoreBind
+  where
+        printOptions = PrintOptions 0 " - "
+        printBind :: DynFlags -> CoreBind -> CoreM CoreBind
         printBind dflags bndr@(NonRec b expr) = do
           putMsgS "Printing non-recursive function"
-          printAbsyns dflags [(b, expr)]
+          --printAbsyns dflags printOptions [(b, expr)]
+          putMsgS $ showSDoc dflags (ppr b)
           return bndr
         printBind dflags bndr@(Rec lst) = do
           putMsgS "Printing recursive functions"
-          printAbsyns dflags lst
+          putMsgS $ getCoreBndrName dflags (fst $ head $ lst)
+          putMsgS $ "Tail recursive: " ++ (show $ isTailRecursive dflags bndr)
+          --printAbsyns dflags printOptions lst
           return bndr
 
-printAbsyns :: DynFlags -> [(CoreBndr, Expr CoreBndr)] -> CoreM ()
-printAbsyns dlfas [] = return ()
-printAbsyns dflags ((coreBndr, expr) : rest) = do
-  putMsgS $ "Binding: " ++ showSDoc dflags (ppr coreBndr)
-  printAbsyn dflags 0 '-' expr
+getCoreBndrName :: DynFlags -> CoreBndr -> String
+getCoreBndrName dflags coreBndr = showSDoc dflags (ppr coreBndr)
 
-printLine :: Outputable a => DynFlags -> Int -> Char -> String -> a -> CoreM ()
-printLine dflags indentation char str a =
-  putMsgS $ replicate indentation char ++ str ++ showSDoc dflags (ppr a)
+isTailRecursive :: DynFlags -> CoreBind -> Bool
+isTailRecursive _ (NonRec _ _) = False
+isTailRecursive dflags (Rec lst) =
+  all (\(coreBndr, expr) ->
+    let coreBndrName = getCoreBndrName dflags coreBndr
+    in isTailRecursive' coreBndrName expr) lst
+  where
+    isTailRecursive' coreBndrName (Var id) = True
+    isTailRecursive' coreBndrName (Lit lit) = True
+    isTailRecursive' coreBndrName (App expr0 expr1) = isCallTo dflags expr0 coreBndrName
+    isTailRecursive' coreBndrName (Lam coreBndr expr) = isTailRecursive' coreBndrName expr --Probably not correct
+    isTailRecursive' coreBndrName (Let (NonRec bndr expr0) expr1) = isTailRecursive' coreBndrName expr1 --expr0 is unused. Do something about it.
+    isTailRecursive' coreBndrName (Let (Rec lst) expr) = isTailRecursive' coreBndrName expr --lst is unused. Do something about it.
+    isTailRecursive' coreBndrName (Case expr coreBndr _ alternatives) =
+      all (\(Alt altCon coreBndrs rhs) -> isTailRecursive' coreBndrName rhs) alternatives
+    isTailRecursive' coreBndrName (Cast expr _) = isTailRecursive' coreBndrName expr
+    isTailRecursive' coreBndrName (Tick _ expr) = isTailRecursive' coreBndrName expr
+    isTailRecursive' coreBndrName (Coercion coercion) = True
 
-printAbsyn :: DynFlags -> Int -> Char -> Expr CoreBndr -> CoreM ()
-printAbsyn dflags indentation char (Var id) =
-  printLine dflags indentation char "Var " id
-printAbsyn dflags indentation char (Lit lit) =
-  printLine dflags indentation char "Lit " lit
-printAbsyn dflags indentation char (App expr0 expr1) = do
-  putMsgS $ replicate indentation char ++ "App"
-  printAbsyn dflags (indentation + 1) char expr0
-  printAbsyn dflags (indentation + 1) char expr1
-printAbsyn dflags indentation char (Lam coreBndr expr) = do
-  printLine dflags indentation char "Lam " coreBndr
-  printAbsyn dflags (indentation + 1) char expr
+isCallTo :: DynFlags -> Expr CoreBndr -> String -> Bool
+isCallTo dflags (Var id) coreBndrName = coreBndrName == showSDoc dflags (ppr id)
+isCallTo dflags (App expr0 expr1) coreBndrName = isCallTo dflags expr0 coreBndrName
+isCallTo dflags _ coreBndrName = False
 
-printAbsyn dflags indentation char (Let (NonRec bndr expr0) expr1) = do
-  putMsgS $ replicate indentation char ++ "Let"
-  printAbsyn dflags (indentation + 1) char expr1
-printAbsyn dflags indentation char (Let (Rec lst) expr1) = do --This case is not done
-  putMsgS $ replicate indentation char ++ "Let"
-  printAbsyn dflags (indentation + 1) char expr1
+printAbsyns :: DynFlags -> PrintOptions -> [(CoreBndr, Expr CoreBndr)] -> CoreM ()
+printAbsyns dflags printOptions [] = return ()
+printAbsyns dflags printOptions (binding : rest) = do
+  printLine dflags printOptions "" binding
+  printBinding dflags printOptions binding
+  printAbsyns dflags printOptions rest
 
-printAbsyn dflags indentation char (Case expr coreBndr _ alternatives) = do
-  printLine dflags indentation char "Case " coreBndr
-  let printAlternatives indentation [] = return ()
-      printAlternatives indentation ((Alt altCon coreBndrs rhs) : alts) = do
-        printLine dflags indentation char "Pattern " altCon
-        foldl (\acc e -> printLine dflags indentation char "Bndr " e) (pure ()) coreBndrs
-        printAbsyn dflags (indentation + 1) char rhs
-        printAlternatives indentation alts
-  printAlternatives (indentation + 1) alternatives
-  printAbsyn dflags (indentation + 1) char expr
+printBinding :: DynFlags -> PrintOptions -> (CoreBndr, Expr CoreBndr) -> CoreM ()
+printBinding dflags printOptions (coreBndr, expr) = do
+  putMsgS $ (makeIndentation printOptions) ++ "Binding: " ++ showSDoc dflags (ppr coreBndr)
+  printAbsyn dflags (incInden printOptions) expr
 
-printAbsyn dflags indentation char (Cast expr _) = do
-  putMsgS $ replicate indentation char ++ "Cast"
-  printAbsyn dflags (indentation + 1) char expr
-printAbsyn dflags indentation char (Tick _ expr) = do
-  putMsgS $ replicate indentation char ++ "Tick"
-  printAbsyn dflags (indentation + 1) char expr
-printAbsyn dflags indentation char (Type typ) =
-  printLine dflags indentation char "Type " typ
-printAbsyn dflags indentation char (Coercion coercion) =
-  printLine dflags indentation char "Coercion " coercion
+printLine :: Outputable a => DynFlags -> PrintOptions -> String -> a -> CoreM ()
+printLine dflags printOptions str a =
+  putMsgS $ (makeIndentation printOptions) ++ str ++ showSDoc dflags (ppr a)
+
+printAbsyn :: DynFlags -> PrintOptions -> Expr CoreBndr -> CoreM ()
+printAbsyn dflags printOptions (Var id) =
+  printLine dflags printOptions "Var " id
+printAbsyn dflags printOptions (Lit lit) =
+  printLine dflags printOptions "Lit " lit
+printAbsyn dflags printOptions (App expr0 expr1) = do
+  putMsgS $ (makeIndentation printOptions) ++ "App"
+  printAbsyn dflags (incInden printOptions) expr0
+  printAbsyn dflags (incInden printOptions) expr1
+printAbsyn dflags printOptions (Lam coreBndr expr) = do
+  printLine dflags printOptions "Lam " coreBndr
+  printAbsyn dflags (incInden printOptions) expr
+
+printAbsyn dflags printOptions (Let (NonRec bndr expr0) expr1) = do
+  printLine dflags printOptions "Let " bndr
+  printAbsyn dflags (incInden printOptions) expr1
+printAbsyn dflags printOptions (Let (Rec lst) expr1) = do
+  putMsgS $ (makeIndentation printOptions) ++ "Let"
+  printAbsyns dflags (incInden printOptions) lst
+  printAbsyn dflags (incInden printOptions) expr1
+
+printAbsyn dflags printOptions (Case expr coreBndr _ alternatives) = do
+  printLine dflags printOptions "Case " coreBndr
+  let printAlternatives printOptions [] = return ()
+      printAlternatives printOptions ((Alt altCon coreBndrs rhs) : alts) = do
+        printLine dflags printOptions "Pattern " altCon
+        foldl (\acc e -> printLine dflags printOptions "Bndr " e) (pure ()) coreBndrs
+        printAbsyn dflags (incInden printOptions) rhs
+        printAlternatives printOptions alts
+  printAlternatives (incInden printOptions) alternatives
+  printAbsyn dflags (incInden printOptions) expr
+
+printAbsyn dflags printOptions (Cast expr _) = do
+  putMsgS $ (makeIndentation printOptions) ++ "Cast"
+  printAbsyn dflags (incInden printOptions) expr
+printAbsyn dflags printOptions (Tick _ expr) = do
+  putMsgS $ (makeIndentation printOptions) ++ "Tick"
+  printAbsyn dflags (incInden printOptions) expr
+printAbsyn dflags printOptions (Type typ) =
+  printLine dflags printOptions "Type " typ
+printAbsyn dflags printOptions (Coercion coercion) =
+  printLine dflags printOptions "Coercion " coercion
 
 printRecursive :: Outputable b => DynFlags -> [(b, Expr b)] -> CoreM ()
 printRecursive _ [] = return ()
