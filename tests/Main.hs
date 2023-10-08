@@ -20,3 +20,12 @@ barT n = aux n id
         aux 0 c = c 0
         aux n c = aux (n - 1) (\x -> c $ n + x)
         
+tailRec0 :: Int -> Int
+tailRec0 0 = 0
+tailRec0 1 = 1
+tailRec0 n = tailRec1 (n - 1)
+
+tailRec1 :: Int -> Int
+tailRec1 0 = 0
+tailRec1 1 = 1
+tailRec1 n = tailRec0 (n - 2)
