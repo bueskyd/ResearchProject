@@ -1,6 +1,10 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 module PluginTest (plugin) where
 import GHC.Plugins
 import Data.Maybe (fromMaybe)
+import Data.Data
+import Control.Monad (when, unless)
+import Data.Typeable
 
 data PrintOptions = PrintOptions { indentation :: Int, indentationString :: String }
 
@@ -20,6 +24,9 @@ install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
 install _ todo = do
     return (CoreDoPluginPass "Hi mom" pass : todo)
 
+-- getName :: Outputable a => DynFlags -> a -> String
+-- getName dflags a = showSDoc dflags (ppr a)
+
 pass :: ModGuts -> CoreM ModGuts
 pass guts = do dflags <- getDynFlags
                bindsOnlyPass (mapM (printBind dflags)) guts
@@ -29,11 +36,18 @@ pass guts = do dflags <- getDynFlags
         printBind dflags bndr@(NonRec b expr) = do
           putMsgS "Printing non-recursive function"
           --printAbsyns dflags printOptions [(b, expr)]
+          anns <- annotationsOn guts b :: CoreM [Maybe String]
+          case anns of
+            Just s : t -> putMsgS s
+            Nothing : t -> putMsgS "Empty"
+            _ -> putMsgS "No annotations"
           putMsgS $ showSDoc dflags (ppr b)
           putMsgS ""
           return bndr
         printBind dflags bndr@(Rec lst) = do
           putMsgS "Printing recursive functions"
+          anns <- annotationsOn guts (fst (head lst)) :: CoreM [Maybe[String]]
+          unless (null anns) $ putMsgS $ "Annotated binding found: " 
           sequence $ (map putMsgS $ getCoreBndrNames dflags bndr)
           putMsgS $ "Tail recursive: " ++ (show $ isTailRecursive dflags bndr)
           printAbsyns dflags printOptions lst
@@ -47,6 +61,12 @@ getCoreBndrNames :: DynFlags -> CoreBind -> [String]
 getCoreBndrNames dflags (NonRec coreBndr _) = [getCoreBndrName dflags coreBndr]
 getCoreBndrNames dflags (Rec lst) =
   map (\(coreBndr, _) -> getCoreBndrName dflags coreBndr) lst
+
+
+annotationsOn :: Data a => ModGuts -> CoreBndr -> CoreM [a]
+annotationsOn guts bndr = do
+  (_,anns) <- getAnnotations deserializeWithData guts
+  return $ lookupWithDefaultUFM anns [] (varName bndr)
 
 isTailRecursive :: DynFlags -> CoreBind -> Bool
 isTailRecursive _ (NonRec _ _) = False

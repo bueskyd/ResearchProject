@@ -14,6 +14,9 @@ barA :: Int -> Int-> Int
 barA 0 acc = acc
 barA n acc = barA (n - 1) (acc + n)
 
+{-# ANN barT (Just "Hello") #-}
+{-# ANN foo (Just "Hello") #-}
+{-# ANN barA (Just "Hello") #-}
 barT :: Int -> Int
 barT n = aux n id
     where
