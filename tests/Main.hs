@@ -29,3 +29,10 @@ tailRec1 :: Int -> Int
 tailRec1 0 = 0
 tailRec1 1 = 1
 tailRec1 n = tailRec0 (n - 2)
+
+shouldNotBeTailRec :: Int -> Int
+shouldNotBeTailRec 0 = 0
+shouldNotBeTailRec n = shouldNotBeTailRec (aux n)
+    where
+        aux 0 = 0
+        aux n = aux (n - 1) - 1

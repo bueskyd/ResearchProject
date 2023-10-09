@@ -1,6 +1,7 @@
 module PluginTest (plugin) where
 import GHC.Plugins
 import Data.Maybe (fromMaybe)
+import Debug.Trace
 
 data PrintOptions = PrintOptions { indentation :: Int, indentationString :: String }
 
@@ -37,6 +38,7 @@ pass guts = do dflags <- getDynFlags
           sequence $ (map putMsgS $ getCoreBndrNames dflags bndr)
           putMsgS $ "Tail recursive: " ++ (show $ isTailRecursive dflags bndr)
           printAbsyns dflags printOptions lst
+          putMsgS "Bindings:"
           putMsgS ""
           return bndr
 
@@ -48,20 +50,56 @@ getCoreBndrNames dflags (NonRec coreBndr _) = [getCoreBndrName dflags coreBndr]
 getCoreBndrNames dflags (Rec lst) =
   map (\(coreBndr, _) -> getCoreBndrName dflags coreBndr) lst
 
+(==>) :: Bool -> Bool -> Bool
+(==>) a b = not a || b
+infixr 1 ==>
+
+getLocalBndrNames :: DynFlags -> (CoreBndr, Expr CoreBndr) -> [String]
+getLocalBndrNames dflags (coreBndr, expr) = getCoreBndrName dflags coreBndr : getLocalBndrNames' expr
+  where
+    getLocalBndrNames' (Var id) = []
+    getLocalBndrNames' (Lit lit) = []
+    getLocalBndrNames' (App expr0 expr1) = getLocalBndrNames' expr0 ++ getLocalBndrNames' expr1
+    getLocalBndrNames' (Lam coreBndr expr) = getLocalBndrNames' expr
+    getLocalBndrNames' (Let (NonRec bndr expr0) expr1) =
+      getLocalBndrNames' expr0 ++ getLocalBndrNames' expr1
+    getLocalBndrNames' (Let (Rec lst) expr) =
+      getLocalBndrNames' expr ++ (lst >>= (\(localBndrName, localBndrExpr) ->
+        getCoreBndrName dflags localBndrName : getLocalBndrNames' localBndrExpr))
+    getLocalBndrNames' (Case expr coreBndr _ alternatives) =
+      getLocalBndrNames' expr ++ (alternatives >>= (\(Alt altCon coreBndrs rhs) -> getLocalBndrNames' rhs))
+    getLocalBndrNames' (Cast expr _) = getLocalBndrNames' expr
+    getLocalBndrNames' (Tick _ expr) = getLocalBndrNames' expr
+    getLocalBndrNames' (Type typ) = []
+    getLocalBndrNames' (Coercion coercion) = []
+
 isTailRecursive :: DynFlags -> CoreBind -> Bool
 isTailRecursive _ (NonRec _ _) = False
 isTailRecursive dflags (Rec lst) =
   let coreBndrNames = getCoreBndrNames dflags (Rec lst)
-  in  all (\(coreBndr, expr) -> isTailRecursive' coreBndrNames expr) lst
+  in all (\(coreBndr, expr) -> isTailRecursive' coreBndrNames expr) lst
   where
     isTailRecursive' coreBndrNames (Var id) = True
     isTailRecursive' coreBndrNames (Lit lit) = True
     isTailRecursive' coreBndrNames (App expr0 expr1) =
       isTailRecursive' coreBndrNames expr0 && not (containsCallToAny dflags expr1 coreBndrNames)
-    isTailRecursive' coreBndrNames (Lam coreBndr expr) = isTailRecursive' coreBndrNames expr --Probably not correct
-    isTailRecursive' coreBndrNames (Let (NonRec bndr expr0) expr1) = isTailRecursive' coreBndrNames expr1 --expr0 is unused. Do something about it.
-    isTailRecursive' coreBndrNames (Let (Rec lst) expr) = isTailRecursive' coreBndrNames expr --lst is unused. Do something about it.
+    isTailRecursive' coreBndrNames (Lam coreBndr expr) = isTailRecursive' coreBndrNames expr
+    isTailRecursive' coreBndrNames (Let (NonRec bndr expr0) expr1) = let
+      localBndrName = getCoreBndrName dflags bndr
+      localIsTRIfReferenced =
+          (containsCallTo dflags expr1 localBndrName) ==>
+          (isTailRecursive' (localBndrName : coreBndrNames) expr0)
+      in isTailRecursive' coreBndrNames expr1
+
+    isTailRecursive' coreBndrNames (Let (Rec lst) expr) = let
+      localBndrNames = getCoreBndrNames dflags (Rec lst)
+      localsAreTRIfReferenced =
+        (containsCallToAny dflags expr localBndrNames) ==>
+        all (\(_, localBndrExpr) -> isTailRecursive' (localBndrNames ++ coreBndrNames) localBndrExpr) lst
+      in isTailRecursive' coreBndrNames expr
+
     isTailRecursive' coreBndrNames (Case expr coreBndr _ alternatives) =
+      isTailRecursive' coreBndrNames expr &&
       all (\(Alt altCon coreBndrs rhs) -> isTailRecursive' coreBndrNames rhs) alternatives
     isTailRecursive' coreBndrNames (Cast expr _) = isTailRecursive' coreBndrNames expr
     isTailRecursive' coreBndrNames (Tick _ expr) = isTailRecursive' coreBndrNames expr
