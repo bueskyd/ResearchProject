@@ -1,7 +1,11 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 module PluginTest (plugin) where
 import GHC.Plugins
 import Data.Maybe (fromMaybe)
 import Debug.Trace
+import Data.Data
+import Control.Monad (when, unless)
+import Data.Typeable
 
 data PrintOptions = PrintOptions { indentation :: Int, indentationString :: String }
 
@@ -21,6 +25,9 @@ install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
 install _ todo = do
     return (CoreDoPluginPass "Hi mom" pass : todo)
 
+-- getName :: Outputable a => DynFlags -> a -> String
+-- getName dflags a = showSDoc dflags (ppr a)
+
 pass :: ModGuts -> CoreM ModGuts
 pass guts = do dflags <- getDynFlags
                bindsOnlyPass (mapM (printBind dflags)) guts
@@ -30,17 +37,29 @@ pass guts = do dflags <- getDynFlags
         printBind dflags bndr@(NonRec b expr) = do
           putMsgS "Printing non-recursive function"
           --printAbsyns dflags printOptions [(b, expr)]
+          anns <- annotationsOn guts b :: CoreM [Maybe String]
+          case anns of
+            Just s : t -> putMsgS s
+            Nothing : t -> putMsgS "Empty"
+            _ -> putMsgS "No annotations"
+          putMsgS $ "Locals are tail recursive: " ++ (show $ isTailRecursive dflags bndr)
           putMsgS $ showSDoc dflags (ppr b)
           putMsgS ""
           return bndr
         printBind dflags bndr@(Rec lst) = do
           putMsgS "Printing recursive functions"
+          anns <- annotationsOn guts (fst (head lst)) :: CoreM [Maybe[String]]
+          unless (null anns) $ putMsgS $ "Annotated binding found: " 
           sequence $ (map putMsgS $ getCoreBndrNames dflags bndr)
           putMsgS $ "Tail recursive: " ++ (show $ isTailRecursive dflags bndr)
-          printAbsyns dflags printOptions lst
-          putMsgS "Bindings:"
+          --printAbsyns dflags printOptions lst
           putMsgS ""
           return bndr
+
+annotationsOn :: Data a => ModGuts -> CoreBndr -> CoreM [a]
+annotationsOn guts bndr = do
+  (_,anns) <- getAnnotations deserializeWithData guts
+  return $ lookupWithDefaultUFM anns [] (varName bndr)
 
 getCoreBndrName :: DynFlags -> CoreBndr -> String
 getCoreBndrName dflags coreBndr = showSDoc dflags (ppr coreBndr)
@@ -60,12 +79,11 @@ getLocalBndrNames dflags (coreBndr, expr) = getCoreBndrName dflags coreBndr : ge
     getLocalBndrNames' (Var id) = []
     getLocalBndrNames' (Lit lit) = []
     getLocalBndrNames' (App expr0 expr1) = getLocalBndrNames' expr0 ++ getLocalBndrNames' expr1
-    getLocalBndrNames' (Lam coreBndr expr) = getLocalBndrNames' expr
+    getLocalBndrNames' (Lam coreBndr expr) = []
     getLocalBndrNames' (Let (NonRec bndr expr0) expr1) =
-      getLocalBndrNames' expr0 ++ getLocalBndrNames' expr1
+      getCoreBndrName dflags bndr : getLocalBndrNames' expr1
     getLocalBndrNames' (Let (Rec lst) expr) =
-      getLocalBndrNames' expr ++ (lst >>= (\(localBndrName, localBndrExpr) ->
-        getCoreBndrName dflags localBndrName : getLocalBndrNames' localBndrExpr))
+      getLocalBndrNames' expr ++ (map (\(localBndrName, _) -> getCoreBndrName dflags localBndrName) lst)
     getLocalBndrNames' (Case expr coreBndr _ alternatives) =
       getLocalBndrNames' expr ++ (alternatives >>= (\(Alt altCon coreBndrs rhs) -> getLocalBndrNames' rhs))
     getLocalBndrNames' (Cast expr _) = getLocalBndrNames' expr
@@ -74,37 +92,40 @@ getLocalBndrNames dflags (coreBndr, expr) = getCoreBndrName dflags coreBndr : ge
     getLocalBndrNames' (Coercion coercion) = []
 
 isTailRecursive :: DynFlags -> CoreBind -> Bool
-isTailRecursive _ (NonRec _ _) = False
-isTailRecursive dflags (Rec lst) =
-  let coreBndrNames = getCoreBndrNames dflags (Rec lst)
-  in all (\(coreBndr, expr) -> isTailRecursive' coreBndrNames expr) lst
+isTailRecursive dflags expr = case expr of
+  (NonRec coreBndr expr) -> isTailRecursive' [getCoreBndrName dflags coreBndr] expr
+  (Rec lst) -> let
+    coreBndrNames = getCoreBndrNames dflags (Rec lst)
+    in all (\(coreBndr, expr) -> isTailRecursive' coreBndrNames expr) lst
   where
-    isTailRecursive' coreBndrNames (Var id) = True
-    isTailRecursive' coreBndrNames (Lit lit) = True
-    isTailRecursive' coreBndrNames (App expr0 expr1) =
-      isTailRecursive' coreBndrNames expr0 && not (containsCallToAny dflags expr1 coreBndrNames)
-    isTailRecursive' coreBndrNames (Lam coreBndr expr) = isTailRecursive' coreBndrNames expr
-    isTailRecursive' coreBndrNames (Let (NonRec bndr expr0) expr1) = let
-      localBndrName = getCoreBndrName dflags bndr
-      localIsTRIfReferenced =
-          (containsCallTo dflags expr1 localBndrName) ==>
-          (isTailRecursive' (localBndrName : coreBndrNames) expr0)
-      in isTailRecursive' coreBndrNames expr1
+    isTailRecursive' coreBndrNames expr = case expr of
+      (Var id) -> True
+      (Lit lit) -> True
+      (App expr0 expr1) ->
+        isTailRecursive' coreBndrNames expr0 &&
+        not (containsCallToAny dflags expr1 coreBndrNames) &&
+        isTailRecursive' coreBndrNames expr1 --Test correctness
 
-    isTailRecursive' coreBndrNames (Let (Rec lst) expr) = let
-      localBndrNames = getCoreBndrNames dflags (Rec lst)
-      localsAreTRIfReferenced =
-        (containsCallToAny dflags expr localBndrNames) ==>
-        all (\(_, localBndrExpr) -> isTailRecursive' (localBndrNames ++ coreBndrNames) localBndrExpr) lst
-      in isTailRecursive' coreBndrNames expr
-
-    isTailRecursive' coreBndrNames (Case expr coreBndr _ alternatives) =
-      isTailRecursive' coreBndrNames expr &&
-      all (\(Alt altCon coreBndrs rhs) -> isTailRecursive' coreBndrNames rhs) alternatives
-    isTailRecursive' coreBndrNames (Cast expr _) = isTailRecursive' coreBndrNames expr
-    isTailRecursive' coreBndrNames (Tick _ expr) = isTailRecursive' coreBndrNames expr
-    isTailRecursive' coreBndrNames (Type typ) = True
-    isTailRecursive' coreBndrNames (Coercion coercion) = True
+      (Lam coreBndr expr) -> isTailRecursive' coreBndrNames expr
+      (Let (NonRec bndr expr0) expr1) -> let
+        localBndrName = getCoreBndrName dflags bndr
+        localIsTR = isTailRecursive' (localBndrName : coreBndrNames) expr0
+        in localIsTR && isTailRecursive' coreBndrNames expr1
+      (Let (Rec lst) expr) -> let
+        localBndrNames = getCoreBndrNames dflags (Rec lst)
+        referenceableBndrNames = coreBndrNames ++ localBndrNames
+        localsAreTR = all (\bndr@(localBndrName, localBndrExpr) -> let
+          localBndrNamesInLocal = getLocalBndrNames dflags bndr
+          in isTailRecursive' (localBndrNamesInLocal ++ referenceableBndrNames) localBndrExpr) lst
+        in
+          localsAreTR && isTailRecursive' referenceableBndrNames expr
+      (Case expr coreBndr _ alternatives) ->
+        isTailRecursive' coreBndrNames expr &&
+        all (\(Alt altCon coreBndrs rhs) -> isTailRecursive' coreBndrNames rhs) alternatives
+      (Cast expr _) -> isTailRecursive' coreBndrNames expr
+      (Tick _ expr) -> isTailRecursive' coreBndrNames expr
+      (Type typ) -> True
+      (Coercion coercion) -> True
 
 containsCallToAny :: DynFlags -> Expr CoreBndr -> [String] -> Bool
 containsCallToAny dflags expr coreBndrNames =
@@ -116,8 +137,8 @@ containsCallTo dflags (Lit lit) coreBndrName = False
 containsCallTo dflags (App expr0 expr1) coreBndrName =
   containsCallTo dflags expr0 coreBndrName || containsCallTo dflags expr1 coreBndrName
 containsCallTo dflags (Lam coreBndr expr) coreBndrName = containsCallTo dflags expr coreBndrName
-containsCallTo dflags (Let (NonRec bndr expr0) expr1) coreBndrName = containsCallTo dflags expr1 coreBndrName --expr0 is unused. Do something about it.
-containsCallTo dflags (Let (Rec lst) expr) coreBndrName = containsCallTo dflags expr coreBndrName --lst is unused. Do something about it.
+containsCallTo dflags (Let (NonRec bndr expr0) expr1) coreBndrName = containsCallTo dflags expr1 coreBndrName --expr0 is unused. Do something about it? Maybe?
+containsCallTo dflags (Let (Rec lst) expr) coreBndrName = containsCallTo dflags expr coreBndrName --lst is unused. Do something about it? Maybe?
 containsCallTo dflags (Case expr coreBndr _ alternatives) coreBndrName =
       any (\(Alt altCon coreBndrs rhs) -> containsCallTo dflags rhs coreBndrName) alternatives
 containsCallTo dflags (Cast expr _) coreBndrName = containsCallTo dflags expr coreBndrName

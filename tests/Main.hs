@@ -14,6 +14,9 @@ barA :: Int -> Int-> Int
 barA 0 acc = acc
 barA n acc = barA (n - 1) (acc + n)
 
+{-# ANN barT (Just "Hello") #-}
+{-# ANN foo (Just "Hello") #-}
+{-# ANN barA (Just "Hello") #-}
 barT :: Int -> Int
 barT n = aux n id
     where
@@ -30,9 +33,19 @@ tailRec1 0 = 0
 tailRec1 1 = 1
 tailRec1 n = tailRec0 (n - 2)
 
-shouldNotBeTailRec :: Int -> Int
-shouldNotBeTailRec 0 = 0
-shouldNotBeTailRec n = shouldNotBeTailRec (aux n)
+shouldNotBeTailRec0 :: Int -> Int
+shouldNotBeTailRec0 0 = 0
+shouldNotBeTailRec0 n = shouldNotBeTailRec0 (aux n)
     where
         aux 0 = 0
         aux n = aux (n - 1) - 1
+
+shouldNotBeTailRec1 :: Int -> Int
+shouldNotBeTailRec1 0 = 0
+shouldNotBeTailRec1 n = shouldNotBeTailRec1 (n - 1) - 1
+
+shouldBeTailRec0 :: Int -> Int
+shouldBeTailRec0 n = shouldBeTailRec0 n where
+    shouldBeTailRec0 0 = 0
+    shouldBeTailRec0 n = shouldBeTailRec0 (n - 1)
+    
