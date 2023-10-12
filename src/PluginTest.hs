@@ -45,12 +45,12 @@ pass guts = do dflags <- getDynFlags
           return bndr
         printBind dflags bndr@(Rec lst) = do
           putMsgS "Printing recursive functions"
-          anns <- annotationsOn guts (fst (head lst)) :: CoreM [Maybe[String]]
-          unless (null anns) $ putMsgS $ "Annotated binding found: "
-          sequence $ (map putMsgS $ getCoreBndrNames dflags bndr)
-          putMsgS $ "Tail recursive: " ++ (show $ isTailRecursive dflags bndr)
-          --printAbsyns dflags printOptions lst
-          putMsgS ""
+          anns <- annotationsOn guts (fst (head lst)) :: CoreM [String]
+          when ("AUTO_CPS" `elem` anns) $ do
+            sequence $ map putMsgS (getCoreBndrNames dflags bndr)
+            putMsgS $ "Tail recursive: " ++ show (isTailRecursive dflags bndr)
+            --printAbsyns dflags printOptions lst
+            putMsgS ""
           return bndr
 
 annotationsOn :: Data a => ModGuts -> CoreBndr -> CoreM [a]
