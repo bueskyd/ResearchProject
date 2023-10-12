@@ -14,9 +14,6 @@ barA :: Int -> Int-> Int
 barA 0 acc = acc
 barA n acc = barA (n - 1) (acc + n)
 
-{-# ANN barT (Just "Hello") #-}
-{-# ANN foo (Just "Hello") #-}
-{-# ANN barA (Just "Hello") #-}
 barT :: Int -> Int
 barT n = aux n id
     where
@@ -33,6 +30,7 @@ tailRec1 0 = 0
 tailRec1 1 = 1
 tailRec1 n = tailRec0 (n - 2)
 
+{-# ANN foo "AUTO_CPS" #-}
 shouldNotBeTailRec0 :: Int -> Int
 shouldNotBeTailRec0 0 = 0
 shouldNotBeTailRec0 n = shouldNotBeTailRec0 (aux n)

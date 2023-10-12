@@ -37,15 +37,14 @@ pass guts = do dflags <- getDynFlags
         printBind dflags bndr@(NonRec b expr) = do
           putMsgS "Printing non-recursive function"
           --printAbsyns dflags printOptions [(b, expr)]
-          anns <- annotationsOn guts b :: CoreM [Maybe String]
-          case anns of
-            Just s : t -> putMsgS s
-            Nothing : t -> putMsgS "Empty"
-            _ -> putMsgS "No annotations"
-          putMsgS $ "Locals are tail recursive: " ++ (show $ isTailRecursive dflags bndr)
-          putMsgS $ showSDoc dflags (ppr b)
-          putMsgS ""
-          return bndr
+          anns <- annotationsOn guts b :: CoreM [String]
+          if "AUTO_CPS" `elem` anns then do
+            putMsgS $ "Locals are tail recursive: " ++ (show $ isTailRecursive dflags bndr) 
+            putMsgS $ showSDoc dflags (ppr b)
+            putMsgS "" 
+            return bndr
+          else
+            return bndr
         printBind dflags bndr@(Rec lst) = do
           putMsgS "Printing recursive functions"
           anns <- annotationsOn guts (fst (head lst)) :: CoreM [Maybe[String]]
