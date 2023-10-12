@@ -36,7 +36,7 @@ pass guts = do dflags <- getDynFlags
         printBind :: DynFlags -> CoreBind -> CoreM CoreBind
         printBind dflags bndr@(NonRec b expr) = do
           putMsgS "Printing non-recursive function"
-          --printAbsyns dflags printOptions [(b, expr)]
+          printAbsyns dflags printOptions [(b, expr)]
           anns <- annotationsOn guts b :: CoreM [Maybe String]
           case anns of
             Just s : t -> putMsgS s
@@ -115,8 +115,8 @@ isTailRecursive dflags expr = case expr of
         localBndrNames = getCoreBndrNames dflags (Rec lst)
         referenceableBndrNames = coreBndrNames ++ localBndrNames
         localsAreTR = all (\bndr@(localBndrName, localBndrExpr) -> let
-          localBndrNamesInLocal = getLocalBndrNames dflags bndr
-          in isTailRecursive' (localBndrNamesInLocal ++ referenceableBndrNames) localBndrExpr) lst
+          --localBndrNamesInLocal = getLocalBndrNames dflags bndr
+          in isTailRecursive' ({-localBndrNamesInLocal ++ -}referenceableBndrNames) localBndrExpr) lst
         in
           localsAreTR && isTailRecursive' referenceableBndrNames expr
       (Case expr coreBndr _ alternatives) ->

@@ -49,3 +49,23 @@ shouldBeTailRec0 n = shouldBeTailRec0 n where
     shouldBeTailRec0 0 = 0
     shouldBeTailRec0 n = shouldBeTailRec0 (n - 1)
     
+letInLet :: Int -> Int
+letInLet n = let
+    x = let
+        y = 8
+        in y
+    in x
+
+letInIn :: Int -> Int
+letInIn n = let
+    x = 7
+    in
+        let
+            y = 3
+            in y
+
+doubleLet :: Int -> Int
+doubleLet n = let
+    x = 7
+    y = 8
+    in x + y
