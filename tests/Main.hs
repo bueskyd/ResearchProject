@@ -39,6 +39,8 @@ tailRec1 1 = 1
 tailRec1 n = tailRec0 (n - 2)
 
 {-# ANN foo "AUTO_CPS" #-}
+{-# ANN tailRec0 "AUTO_CPS" #-}
+{-# ANN tailRec1 "AUTO_CPS" #-}
 shouldNotBeTailRec0 :: Int -> Int
 shouldNotBeTailRec0 0 = 0
 shouldNotBeTailRec0 n = shouldNotBeTailRec0 (aux n)
