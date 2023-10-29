@@ -6,6 +6,9 @@ import Debug.Trace
 import Data.Data
 import Control.Monad (when, unless)
 import Data.Typeable
+import GHC.Builtin.Types (manyDataConTy)
+import GHC.Types.Id.Info (vanillaIdInfo)
+import GHC.Core.TyCo.Rep
 
 data PrintOptions = PrintOptions { indentation :: Int, indentationString :: String }
 
@@ -35,8 +38,8 @@ pass guts = do dflags <- getDynFlags
         printOptions = PrintOptions 0 " - "
         printBind :: DynFlags -> CoreBind -> CoreM CoreBind
         printBind dflags bndr@(NonRec b expr) = do
-          putMsgS "Printing non-recursive function"
-          --printAbsyns dflags printOptions [(b, expr)]
+          putMsgS $ "Printing non-recursive function: " ++ (getCoreBndrName dflags b)
+          printAbsyns dflags printOptions [(b, expr)]
           anns <- annotationsOn guts b :: CoreM [String]
           when ("AUTO_CPS" `elem` anns) $ do
             putMsgS ("Locals are tail recursive: " ++ show (isTailRecursive dflags bndr))
@@ -45,13 +48,173 @@ pass guts = do dflags <- getDynFlags
           return bndr
         printBind dflags bndr@(Rec lst) = do
           putMsgS "Printing recursive functions"
+          --sequence $ map (\(coreBndr, _) -> putMsgS $ '\t' : (getCoreBndrName dflags coreBndr)) lst
+
+          {-let headCoreBndr = fst $ head lst
+          let headExpr = snd $ head lst
+          putMsgS $ showSDoc dflags $ ppr $ makeCPSFunTy $ headCoreBndr
+          let maybeReturnType = getReturnType $ headCoreBndr
+          case maybeReturnType of
+            Just funcType -> do
+              putMsgS $ "Return type: " ++ (showSDoc dflags $ ppr $ funcType)
+              newVar <- makeVar "HaveYouEverEatenAPie" funcType
+              putMsgS $ "New var: " ++ (showSDoc dflags $ ppr $ newVar)
+              let newVarType = varType newVar
+              putMsgS $ "New var type: " ++ (showSDoc dflags $ ppr $ newVarType)
+
+              continuation <- makeVar "" $ makeContinuationType headCoreBndr
+              putMsgS $ "Continuation: " ++ (showSDoc dflags $ ppr continuation)
+              let maybeNewAbsyn = prependArg headExpr continuation
+              case maybeNewAbsyn of
+                Just newAbsyn -> do
+                  putMsgS $ showSDoc dflags $ ppr headExpr
+                  putMsgS $ showSDoc dflags $ ppr newAbsyn
+                Nothing -> putMsgS "Cannot prepend argument. Not a function."
+
+            Nothing -> return ()-}
+          putMsgS "Original function"
+          printAbsyn dflags printOptions $ snd $ head lst
+          
+          let cpsFunc = transformToCPS' $ head lst
+          putMsgS "CPS function"
+          printAbsyn dflags printOptions $ snd cpsFunc
+
+          --printAbsyns dflags printOptions lst
           anns <- annotationsOn guts (fst (head lst)) :: CoreM [String]
           when ("AUTO_CPS" `elem` anns) $ do
             sequence $ map putMsgS (getCoreBndrNames dflags bndr)
             putMsgS $ "Tail recursive: " ++ show (isTailRecursive dflags bndr)
-            --printAbsyns dflags printOptions lst
             putMsgS ""
           return bndr
+
+--Remember to not transform subexpressions not containing recursive calls
+{-transformToCPS :: DynFlags -> CoreBind -> CoreBind
+transformToCPS dflags (NonRec coreBndr expr) = NonRec coreBndr expr--Deal with this later
+transformToCPS dflags (Rec lst) =
+  Rec $ map (\(coreBndr, expr) -> let
+    coreBndrName = getCoreBndrName coreBndr in
+    (coreBndr, aux expr [coreBndrName])) lst
+  where
+    aux expr coreBndrNames =
+      if not $ containsCallToAny dflags expr coreBndrNames
+        (coreBndr, App (Var {-continuation-}) expr)
+      else
+        case expr of
+        (Var id) = Var id
+        (Lit lit) = Lit lit
+        (App expr0 expr1) = let
+          tExpr0 = aux dflags expr0 coreBndrNames
+          tExpr1 = aux dflags expr1 coreBndrNames
+          --if tExpr1 is recursive call then put tExpr0 in lambda and pass to tExpr1
+          in App tExpr0 tExpr1
+        (Lam coreBndr expr) = Lam ({-k-}) (App ({-k-}) (Lam coreBndr (aux dflags expr coreBndrNames)))
+        (Let (NonRec bndr expr0) expr1) = let
+          localCoreBndrName = getCoreBndrName dflags bndr in
+          Let (NonRec bndr expr0) (aux dflags expr1 (localCoreBndrName : coreBndrNames))--Incorrect. Add 
+        (Let (Rec lst) expr) = (Let (Rec lst) expr)--Incorrect
+        (Case expr coreBndr typ alternatives) = let
+          altAsCPS = map
+            (\(Alt altCon coreBndrs rhs) -> Alt altCon coreBndrs (aux rhs dflags expr coreBndrNames))
+            alternatives
+        in Case (aux expr) coreBndr typ altAsCPS
+        (Cast expr coercion) = Cast (aux expr) coercion
+        (Tick tickish expr) = Tick tickish (aux expr)
+        (Type typ) = Type typ
+        (Coercion coercion) = Coercion coercion-}
+
+{-transformToCPS :: DynFlags -> CoreBind -> CoreBind
+transformToCPS dflags (NonRec coreBndr expr) = NonRec coreBndr expr--Deal with this later
+transformToCPS dflags (Rec lst) = Rec $ map (\(coreBndr, expr) -> (coreBndr, aux expr)) lst where
+  aux (Var id) = Lam ({-name-}) (App (Var ({-name-})) (Var id))
+  aux (Lit lit) = Lam ({-name-}) (App (Var ({-name-})) (Lit lit))
+  aux (App expr0 expr1) =
+    {-App (aux expr1) (Lam (mkLocalVar VanillaId (mkSystemName )) (App (aux expr0) ({-x-})))-}
+
+    {-Lam
+      (mkLocalVar VanillaId ({-make a name-}) (mkSystemName ))
+      (App
+        (aux expr0)
+        (Lam
+          ({-m-})
+          (App
+            (aux expr1)
+            (Lam ({-n-}) (App (App ({-m-}) ({-n-})) ({-k-}))))))-}
+  aux (Lam coreBndr expr) = Lam ({-k-}) (App ({-k-}) (Lam coreBndr expr))
+  aux (Let (NonRec bndr expr0) expr1) = (Let (NonRec bndr expr0) expr1)--Incorrect
+  aux (Let (Rec lst) expr) = (Let (Rec lst) expr)--Incorrect
+  aux (Case expr coreBndr typ alternatives) = let
+      altAsCPS = map
+        (\(Alt altCon coreBndrs rhs) -> Alt altCon coreBndrs (aux rhs))
+        alternatives
+    in Case (aux expr) coreBndr typ altAsCPS
+  aux (Cast expr coercion) = Cast (aux expr) coercion
+  aux (Tick tickish expr) = Tick tickish (aux expr)
+  aux (Type typ) = Type typ
+  aux (Coercion coercion) = Coercion coercion-}
+
+transformToCPS :: CoreBind -> CoreBind
+transformToCPS (NonRec coreBndr expr) = (NonRec coreBndr expr) --Deal with this later
+transformToCPS (Rec lst) = Rec $ map transformToCPS' lst
+
+--Make this an inner function of transformToCPS
+transformToCPS' :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr)
+transformToCPS' (coreBndr, expr) = let
+  (localCoreBndr, transformedExpr) = transformToCPSHelper (coreBndr, expr)
+  localTailRecursive = wrapCPS (coreBndr, expr) (localCoreBndr, transformedExpr)
+  in (coreBndr, localTailRecursive)
+
+transformToCPSHelper :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr)
+transformToCPSHelper (coreBndr, expr) = (coreBndr, expr)
+
+wrapCPS :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr) -> CoreExpr
+wrapCPS (originalCoreBndr, originalExpr) (cpsCoreBndr, cpsExpr) = let
+  (args, _) = collectBinders originalExpr
+  argVars = map (\arg -> Var arg) args
+  returnType = getReturnType originalCoreBndr
+  --identityFunction = mkCoreApps (Var {-id-}) (Type returnType) --How do we make the identify function?
+  --prepend identityFunction to argVars
+  callToTailRec = mkCoreApps (Var cpsCoreBndr) argVars
+  letExpression = mkLetRec [(cpsCoreBndr, cpsExpr)] callToTailRec
+  in mkCoreLams args letExpression
+
+makeContinuationType :: CoreBndr -> Type
+makeContinuationType coreBndr = let
+  kind = varType coreBndr
+  (_, returnType) = splitFunTys kind
+  in mkFunctionType Many returnType returnType
+
+makeCPSFunTy :: CoreBndr -> Type
+makeCPSFunTy coreBndr = let
+  kind = varType coreBndr
+  (scaledArgs, res) = splitFunTys kind
+  continuationType = mkFunctionType Many res res --Make type R -> R
+  continuationResType = mkFunctionType Many continuationType res --Make type (R -> R) -> R
+  --Make type a -> ... -> (R -> R) -> R
+  funcType = foldr (\scaledArg funArgsType -> let
+    multiplicity = scaledMult scaledArg
+    argType = scaledThing scaledArg
+    newArgsType = mkFunctionType multiplicity argType funArgsType
+    in newArgsType) continuationResType scaledArgs
+  in funcType
+
+getReturnType :: CoreBndr -> Maybe Type
+getReturnType coreBndr =
+  fmap (\(_, _, returnType) -> returnType)
+  $ splitFunTy_maybe $ varType coreBndr
+
+prependArg :: CoreExpr -> Var -> Maybe CoreExpr
+prependArg expr var = aux expr where
+  aux expr = case expr of
+    (Lam coreBndr nextParam@(Lam _ _)) -> aux nextParam
+    (Lam coreBndr expr) ->  Just $ Lam coreBndr (Lam var expr)
+    _ -> Nothing
+
+makeVar :: String -> Type -> CoreM Var
+makeVar name typ = do
+  unique <- getUniqueM
+  let varName = mkSystemVarName unique (mkFastString name)
+  let var = mkLocalVar VanillaId varName Many typ vanillaIdInfo
+  return var
 
 annotationsOn :: Data a => ModGuts -> CoreBndr -> CoreM [a]
 annotationsOn guts bndr = do
@@ -155,7 +318,6 @@ isCallTo dflags _ coreBndrName = False
 printAbsyns :: DynFlags -> PrintOptions -> [(CoreBndr, Expr CoreBndr)] -> CoreM ()
 printAbsyns dflags printOptions [] = return ()
 printAbsyns dflags printOptions (binding : rest) = do
-  printLine dflags printOptions "" binding
   printBinding dflags printOptions binding
   printAbsyns dflags printOptions rest
 
@@ -185,7 +347,7 @@ printAbsyn dflags printOptions (Let (NonRec bndr expr0) expr1) = do
   printLine dflags printOptions "Let " bndr
   printAbsyn dflags (incInden printOptions) expr1
 printAbsyn dflags printOptions (Let (Rec lst) expr1) = do
-  putMsgS $ (makeIndentation printOptions) ++ "Let"
+  putMsgS $ (makeIndentation printOptions) ++ "Let rec"
   printAbsyns dflags (incInden printOptions) lst
   printAbsyn dflags (incInden printOptions) expr1
 
@@ -267,5 +429,4 @@ elementIn :: Id -> [Id] -> CoreM Bool
 elementIn a = foldl (\accIo e -> do
   acc <- accIo
   let same = getName a == getName e
-  --if same then putMsgS $ occNameString $ getOccName a else return ()
   return $ same || acc) (return False)

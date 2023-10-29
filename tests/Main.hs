@@ -3,24 +3,32 @@ module Main where
 main :: IO ()
 main = putStrLn "Hello, World!"
 
-foo :: Int -> Int -> Int
-foo a b = a + b + a
+--manyArgs :: Int -> Float -> Bool -> String -> Bool
+--manyArgs n f b s = False
+
+{-foo :: Int -> Int -> Int
+foo a b = a + b + a-}
 
 bar :: Int -> Int
 bar 0 = 0
 bar n = n + bar (n - 1)
 
-barA :: Int -> Int-> Int
+{-barA :: Int -> Int-> Int
 barA 0 acc = acc
-barA n acc = barA (n - 1) (acc + n)
+barA n acc = barA (n - 1) (acc + n)-}
 
-barT :: Int -> Int
+{-barT :: Int -> Int
 barT n = aux n id
     where
         aux 0 c = c 0
-        aux n c = aux (n - 1) (\x -> c $ n + x)
+        aux n c = aux (n - 1) (\x -> c $ n + x)-}
         
-tailRec0 :: Int -> Int
+{-baz :: Int -> Int -> Float
+baz 0 _ = 0.0
+baz _ 0 = 0.0
+baz a b = baz (a - 1) (b - 2) + 1.0-}
+
+{-tailRec0 :: Int -> Int
 tailRec0 0 = 0
 tailRec0 1 = 1
 tailRec0 n = tailRec1 (n - 1)
@@ -67,3 +75,4 @@ doubleLet n = let
     x = 7
     y = 8
     in x + y
+-}
