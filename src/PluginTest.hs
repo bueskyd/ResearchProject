@@ -36,12 +36,22 @@ pass guts = do dflags <- getDynFlags
         autoCPS :: DynFlags -> CoreBind -> CoreBndr -> Expr CoreBndr -> CoreM (CoreBndr, Expr CoreBndr)
         autoCPS dflags bind bndr expr = do
           anns <- annotationsOn guts bndr :: CoreM [String]
+          cps <- transformToCPS dflags bind
+          case (bind, cps) of
+            (Rec lst0, Rec lst1) -> do
+              putMsgS "Original"
+              --printAbsyn dflags printOptions $ snd $ head lst0
+              putMsgS $ showSDoc dflags (ppr $ snd $ head lst0)
+              putMsgS "Transformed to CPS"
+              --printAbsyn dflags printOptions $ snd $ head lst1
+              putMsgS $ showSDoc dflags (ppr $ snd $ head lst1)
+            _ -> return ()
           when ("AUTO_CPS" `elem` anns) $ do
             putMsgS ("Tail recursive: " ++ show (isTailRecursive dflags bind))
             --putMsgS (showSDoc dflags (ppr bind))
             printAbsyns dflags printOptions [(bndr, expr)]
             putMsgS ""
-          pure (bndr,expr)
+          return (bndr,expr)
         printBind :: DynFlags -> CoreBind -> CoreM CoreBind
         printBind dflags bind =
           case bind of {
@@ -51,54 +61,75 @@ pass guts = do dflags <- getDynFlags
               return (Rec transformed)
           }
 
---Remember to not transform subexpressions not containing recursive calls
-transformToCPS :: DynFlags -> CoreBind -> CoreBind
-transformToCPS dflags (NonRec coreBndr expr) = NonRec coreBndr expr--Deal with this later
-transformToCPS dflags (Rec lst) =
-  Rec $ map (\(coreBndr, expr) -> let
-    coreBndrName = getCoreBndrName coreBndr in
-    (coreBndr, aux expr [coreBndrName])) lst
+transformToCPS :: DynFlags -> CoreBind -> CoreM CoreBind
+transformToCPS dflags (NonRec coreBndr expr) = return $ NonRec coreBndr expr --Deal with this later
+transformToCPS dflags (Rec lst) = do
+  transformedFunctions <- sequence $ map transformToCPS' lst
+  return $ Rec transformedFunctions
   where
-    aux expr coreBndrNames =
-      if not $ containsCallToAny dflags expr coreBndrNames
-        (coreBndr, App (Var {-continuation-}) expr)
-      else
+    transformToCPS' :: (CoreBndr, CoreExpr) -> CoreM (CoreBndr, CoreExpr)
+    transformToCPS' (coreBndr, expr) = do
+      (localCoreBndr, transformedExpr) <- transformBodyToCPS dflags (coreBndr, expr)
+      let localTailRecursive = wrapCPS (coreBndr, expr) (localCoreBndr, transformedExpr)
+      return $ (coreBndr, localTailRecursive)
+
+transformBodyToCPS :: DynFlags -> (CoreBndr, CoreExpr) -> CoreM (CoreBndr, CoreExpr)
+transformBodyToCPS dflags (coreBndr, expr) = do
+  let coreBndrName = getCoreBndrName dflags coreBndr
+  transformedBody <- aux coreBndr expr [coreBndrName]
+  return (coreBndr, transformedBody)
+  where
+    aux coreBndr expr coreBndrNames =
+      {-if not $ containsCallToAny dflags expr coreBndrNames then do
+        let continuationType = makeContinuationType coreBndr
+        continuation <- makeVar "baseCont" continuationType
+        return $ App (Var continuation) expr
+      else-}
         case expr of
-        (Var id) = Var id
-        (Lit lit) = Lit lit
-        (App expr0 expr1) = let
-          tExpr0 = aux dflags expr0 coreBndrNames
-          tExpr1 = aux dflags expr1 coreBndrNames
-          --if tExpr1 is recursive call then put tExpr0 in lambda and pass to tExpr1
-          in App tExpr0 tExpr1
-        (Lam coreBndr expr) = Lam ({-k-}) (App ({-k-}) (Lam coreBndr (aux dflags expr coreBndrNames)))
-        (Let (NonRec bndr expr0) expr1) = let
-          localCoreBndrName = getCoreBndrName dflags bndr in
-          Let (NonRec bndr expr0) (aux dflags expr1 (localCoreBndrName : coreBndrNames))--Incorrect. Add 
-        (Let (Rec lst) expr) = (Let (Rec lst) expr)--Incorrect
-        (Case expr coreBndr typ alternatives) = let
-          altAsCPS = map
-            (\(Alt altCon coreBndrs rhs) -> Alt altCon coreBndrs (aux rhs dflags expr coreBndrNames))
-            alternatives
-        in Case (aux expr) coreBndr typ altAsCPS
-        (Cast expr coercion) = Cast (aux expr) coercion
-        (Tick tickish expr) = Tick tickish (aux expr)
-        (Type typ) = Type typ
-        (Coercion coercion) = Coercion coercion
-
-transformToCPS :: CoreBind -> CoreBind
-transformToCPS (NonRec coreBndr expr) = (NonRec coreBndr expr) --Deal with this later
-transformToCPS (Rec lst) = Rec $ map transformToCPS' lst
-
---Make this an inner function of transformToCPS
-transformToCPS' :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr)
-transformToCPS' (coreBndr, expr) = let
-  (localCoreBndr, transformedExpr) = transformToCPSHelper (coreBndr, expr)
-  localTailRecursive = wrapCPS (coreBndr, expr) (localCoreBndr, transformedExpr)
-  in (coreBndr, localTailRecursive)
-
-transformToCPSHelper :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr)
-transformToCPSHelper (coreBndr, expr) = (coreBndr, expr)
+          (Var id) -> return $ Var id
+          (Lit lit) -> return $ Lit lit
+          (App expr0 expr1) -> do
+            expr0' <- aux coreBndr expr0 coreBndrNames
+            expr1' <- aux coreBndr expr1 coreBndrNames
+            --if tExpr1 is recursive call then put tExpr0 in lambda and pass to tExpr1
+            if isCallToAny dflags expr1' coreBndrNames then do
+              let continuationType = makeContinuationType coreBndr
+              continuationBndr <- makeVar "cont" continuationType
+              let continuation = Lam continuationBndr expr0'
+              return $ App expr1' continuation
+            else
+              return $ App expr0' expr1'
+          (Lam lamCoreBndr expr) -> do
+            expr' <- aux coreBndr expr coreBndrNames
+            return $ Lam lamCoreBndr expr'
+          (Let (NonRec bndr expr0) expr1) -> do
+            let localCoreBndrName = getCoreBndrName dflags bndr
+            expr0' <- aux coreBndr expr0 (localCoreBndrName : coreBndrNames)
+            expr1' <- aux coreBndr expr1 (localCoreBndrName : coreBndrNames)
+            return $ Let (NonRec bndr expr0') expr1'
+          (Let (Rec lst) expr) -> return $ Let (Rec lst) expr--Incorrect
+          (Case expr caseCoreBndr typ alternatives) -> do
+            altAsCPS <- sequence $ map
+              (\(Alt altCon coreBndrs rhs) -> do
+                if isCallToAny dflags rhs coreBndrNames then do
+                  rhs' <- aux coreBndr rhs coreBndrNames
+                  return $ Alt altCon coreBndrs rhs'
+                else do
+                  let continuationType = makeContinuationType coreBndr
+                  continuation <- makeVar "baseCont" continuationType
+                  let application = App (Var continuation) rhs
+                  return $ Alt altCon coreBndrs application)
+              alternatives
+            expr' <- aux coreBndr expr coreBndrNames
+            return $ Case expr' caseCoreBndr typ altAsCPS
+          (Cast expr coercion) -> do
+            expr' <- aux coreBndr expr coreBndrNames
+            return $ Cast expr' coercion
+          (Tick tickish expr) -> do
+            expr' <- aux coreBndr expr coreBndrNames
+            return $ Tick tickish expr'
+          (Type typ) -> return $ Type typ
+          (Coercion coercion) -> return $ Coercion coercion
 
 wrapCPS :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr) -> CoreExpr
 wrapCPS (originalCoreBndr, originalExpr) (cpsCoreBndr, cpsExpr) = let
