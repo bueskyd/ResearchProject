@@ -1,0 +1,19 @@
+\ (n :: Int) ->
+  letrec {
+    aux [Occ=LoopBreaker] :: Int -> (Int -> Int) -> Int
+    [LclId,
+     Unf=Unf{Src=<vanilla>, TopLvl=False,
+             Value=True, ConLike=True, WorkFree=True, Expandable=True,
+             Guidance=IF_ARGS [0 60] 350 0}]
+    aux
+      = \ (ds_d114 :: Int) (c :: Int -> Int) ->
+          case == @Int $fEqInt ds_d114 (fromInteger @Int $fNumInt (IS 0#))
+          of {
+            False ->
+              aux
+                (- @Int $fNumInt ds_d114 (fromInteger @Int $fNumInt (IS 1#)))
+                (\ (x :: Int) ->
+                   $ @LiftedRep @Int @Int c (+ @Int $fNumInt ds_d114 x));
+            True -> c (fromInteger @Int $fNumInt (IS 0#))
+          }; } in
+  aux n (id @Int)
