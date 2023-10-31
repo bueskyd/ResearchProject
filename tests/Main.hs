@@ -1,7 +1,7 @@
 module Main where
 
 main :: IO ()
-main = print (bar 1)
+main = print (bar 10)
 
 --manyArgs :: Int -> Float -> Bool -> String -> Bool
 --manyArgs n f b s = False

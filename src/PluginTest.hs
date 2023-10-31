@@ -67,9 +67,11 @@ pass guts = do dflags <- getDynFlags
             (Rec lst0, Rec lst1) -> do
               putMsgS "Original"
               --printAbsyn dflags printOptions $ snd $ head lst0
+              putMsgS $ showSDoc dflags (ppr $ fst $ head lst0)
               putMsgS $ showSDoc dflags (ppr $ snd $ head lst0)
               putMsgS "Transformed to CPS"
               --printAbsyn dflags printOptions $ snd $ head lst1
+              putMsgS $ showSDoc dflags (ppr $ fst $ head lst1)
               putMsgS $ showSDoc dflags (ppr $ snd $ head lst1)
             _ -> return ()
           return cps
@@ -85,7 +87,7 @@ transformToCPS dflags (Rec lst) = do
       localCoreBndr <- makeLocalCPSFun dflags coreBndr
       transformedBody <- transformBodyToCPS dflags (coreBndr, expr) localCoreBndr
       localTailRecursive <- wrapCPS (coreBndr, expr) (localCoreBndr, transformedBody)
-      return $ (localCoreBndr, localTailRecursive)
+      return (coreBndr, localTailRecursive)
 
 transformBodyToCPS :: DynFlags -> (CoreBndr, CoreExpr) -> CoreBndr -> CoreM CoreExpr
 transformBodyToCPS dflags (coreBndr, expr) localCoreBndr = do
@@ -93,7 +95,7 @@ transformBodyToCPS dflags (coreBndr, expr) localCoreBndr = do
   let continuationType = makeContinuationType coreBndr
   continuation <- makeVar "cont" continuationType
   case prependArg expr continuation of
-    Nothing -> return $ expr --expr is not a lambda
+    Nothing -> return expr --expr is not a lambda
     Just expr' -> do
       semiTransformedBody <- aux coreBndr expr' continuation [coreBndrName]
       let transformedBody = replaceRecursiveCalls dflags semiTransformedBody coreBndrName localCoreBndr
@@ -239,8 +241,9 @@ makeCPSFunTy coreBndr = let
 makeLocalCPSFun :: DynFlags -> CoreBndr -> CoreM CoreBndr
 makeLocalCPSFun dflags coreBndr = let
   coreBndrName = getCoreBndrName dflags coreBndr
+  localCoreBndrName = coreBndrName ++ "Aux"
   localFunTy = makeCPSFunTy coreBndr
-  in makeVar coreBndrName localFunTy
+  in makeVar localCoreBndrName localFunTy
 
 getReturnType :: CoreBndr -> Maybe Type
 getReturnType coreBndr =
