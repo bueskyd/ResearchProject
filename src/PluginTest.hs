@@ -66,29 +66,6 @@ pass guts = do dflags <- getDynFlags
           case (bind, cps) of
             (Rec lst0, Rec lst1) -> do
               putMsgS "Original"
-              printAbsyn dflags printOptions $ snd $ head lst0
-              --putMsgS $ showSDoc dflags (ppr $ snd $ head lst0)
-              putMsgS "Transformed to CPS"
-              printAbsyn dflags printOptions $ snd $ head lst1
-              --putMsgS $ showSDoc dflags (ppr $ snd $ head lst1)
-            _ -> return ()
-          when ("AUTO_CPS" `elem` anns) $ do
-            putMsgS ("Tail recursive: " ++ show (isTailRecursive dflags bind))
-            --putMsgS (showSDoc dflags (ppr bind))
-            printAbsyns dflags printOptions [(bndr, expr)]
-            putMsgS ""
-          return (bndr,expr)
-        printBind :: DynFlags -> CoreBind -> CoreM CoreBind
-        printBind dflags bind = do
-          cps <- transformToCPS dflags bind
-          {-case bind of
-            NonRec bndr expr -> putMsgS $ showSDoc dflags $ ppr expr
-            Rec lst -> do
-              _ <- sequence $ map (\(bndr, expr) -> putMsgS $ showSDoc dflags $ ppr expr) lst
-              return ()-}
-          case (bind, cps) of
-            (Rec lst0, Rec lst1) -> do
-              putMsgS "Original"
               --printAbsyn dflags printOptions $ snd $ head lst0
               putMsgS $ showSDoc dflags (ppr $ snd $ head lst0)
               putMsgS "Transformed to CPS"
@@ -105,7 +82,7 @@ transformToCPS dflags (Rec lst) = do
   where
     transformToCPS' :: (CoreBndr, CoreExpr) -> CoreM (CoreBndr, CoreExpr)
     transformToCPS' (coreBndr, expr) = do
-      transformedExpr <- transformBodyToCPS dflags (coreBndr, expr)
+      transformedBody <- transformBodyToCPS dflags (coreBndr, expr)
       localCoreBndr <- makeLocalCPSFun dflags coreBndr
       localTailRecursive <- wrapCPS (coreBndr, expr) (localCoreBndr, transformedBody)
       return $ (localCoreBndr, localTailRecursive)
