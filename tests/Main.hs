@@ -18,6 +18,13 @@ fib 0 = 0
 fib 1 = 1
 fib n = fib (n - 1) + fib (n - 2)
 
+fibC :: Int -> Int
+fibC n = aux n id where
+    aux n c = case n of
+        0 -> c 0
+        1 -> c 1
+        n -> aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))
+
 {-barA :: Int -> Int-> Int
 barA 0 acc = acc
 barA n acc = barA (n - 1) (acc + n)-}
