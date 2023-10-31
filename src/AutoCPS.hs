@@ -108,15 +108,15 @@ transformBodyToCPS dflags (coreBndr, expr) localCoreBndr = do
         (App expr0 expr1) -> do
           expr0' <- aux coreBndr expr0 continuation coreBndrNames
           expr1' <- aux coreBndr expr1 continuation coreBndrNames
-          --if tExpr1 is recursive call then put tExpr0 in lambda and pass to tExpr1
+          --if tExpr1 is recursive call then put expr0' in lambda and pass to expr1'
           if isCallToAny dflags expr1' coreBndrNames then
             case getReturnType coreBndr of
               Nothing -> return $ App expr0 expr1
               Just ty -> do
                 continuationBndr <- makeVar "contBndr" ty
                 let continuationBody = App (Var continuation) (App expr0' (Var continuationBndr))
-                let continuation = Lam continuationBndr continuationBody
-                return $ App expr1' continuation
+                let newContinuation = Lam continuationBndr continuationBody
+                return $ App expr1' newContinuation
           else
             return $ App expr0' expr1'
         (Lam lamCoreBndr expr) -> do
