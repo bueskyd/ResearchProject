@@ -79,7 +79,7 @@ pass guts = do dflags <- getDynFlags
 transformToCPS :: DynFlags -> CoreBind -> CoreM CoreBind
 transformToCPS dflags (NonRec coreBndr expr) = return $ NonRec coreBndr expr --Deal with this later
 transformToCPS dflags (Rec lst) = do
-  transformedFunctions <- sequence $ map transformToCPS' lst
+  transformedFunctions <- mapM transformToCPS' lst
   return $ Rec transformedFunctions
   where
     transformToCPS' :: (CoreBndr, CoreExpr) -> CoreM (CoreBndr, CoreExpr)
@@ -128,14 +128,14 @@ transformBodyToCPS dflags (coreBndr, expr) localCoreBndr = do
           expr1' <- aux coreBndr expr1 continuation (localCoreBndrName : coreBndrNames)
           return $ Let (NonRec bndr expr0') expr1'
         (Let (Rec lst) expr) -> do
-          lst' <- sequence $ map (\(localCoreBndr, expr) -> do
+          lst' <- mapM (\(localCoreBndr, expr) -> do
             let localCoreBndrName = getCoreBndrName dflags localCoreBndr
             expr' <- aux coreBndr expr continuation (localCoreBndrName : coreBndrNames)
             return (localCoreBndr, expr')) lst
           expr' <- aux coreBndr expr continuation coreBndrNames
           return $ Let (Rec lst') expr'
         (Case expr caseCoreBndr typ alternatives) -> do
-          altAsCPS <- sequence $ map
+          altAsCPS <- mapM
             (\(Alt altCon coreBndrs rhs) -> do
               if containsCallToAny dflags rhs coreBndrNames then do
                 rhs' <- aux coreBndr rhs continuation coreBndrNames
@@ -323,8 +323,7 @@ isTailRecursive dflags expr = case expr of
         localBndrNames = getCoreBndrNames dflags (Rec lst)
         referenceableBndrNames = coreBndrNames ++ localBndrNames
         localsAreTR = all (\bndr@(localBndrName, localBndrExpr) -> let
-          --localBndrNamesInLocal = getLocalBndrNames dflags bndr
-          in isTailRecursive' ({-localBndrNamesInLocal ++ -}referenceableBndrNames) localBndrExpr) lst
+          in isTailRecursive' referenceableBndrNames localBndrExpr) lst
         in
           localsAreTR && isTailRecursive' referenceableBndrNames expr
       (Case expr coreBndr _ alternatives) ->

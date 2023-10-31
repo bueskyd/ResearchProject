@@ -1,7 +1,7 @@
 module Main where
 
 main :: IO ()
-main = print (bar 10)
+main = print (fib 1)
 
 --manyArgs :: Int -> Float -> Bool -> String -> Bool
 --manyArgs n f b s = False
@@ -9,9 +9,14 @@ main = print (bar 10)
 {-foo :: Int -> Int -> Int
 foo a b = a + b + a-}
 
-bar :: Int -> Int
+{-bar :: Int -> Int
 bar 0 = 0
-bar n = n + bar (n - 1)
+bar n = n + bar (n - 1)-}
+
+fib :: Int -> Int
+fib 0 = 0
+fib 1 = 1
+fib n = fib (n - 1) + fib (n - 2)
 
 {-barA :: Int -> Int-> Int
 barA 0 acc = acc
