@@ -1,4 +1,4 @@
-module PluginTest (plugin) where
+module AutoCPS (plugin) where
   
 import GHC.Plugins
 import Data.Maybe (fromMaybe)
