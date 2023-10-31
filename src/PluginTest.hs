@@ -8,8 +8,10 @@ import Control.Monad (when, unless, join, forM_)
 import Data.Typeable
 import GHC.Builtin.Types (manyDataConTy)
 import GHC.Types.Id.Info (vanillaIdInfo)
+import GHC.Types.Var
 import GHC.Core.TyCo.Rep
 import qualified Data.Foldable
+import GHC.Types.Unique (mkLocalUnique)
 
 data PrintOptions = PrintOptions { indentation :: Int, indentationString :: String }
 
@@ -37,6 +39,30 @@ pass guts = do dflags <- getDynFlags
         autoCPS dflags bind bndr expr = do
           anns <- annotationsOn guts bndr :: CoreM [String]
           cps <- transformToCPS dflags bind
+          
+          case (bind, cps) of
+            (Rec lst0, Rec lst1) -> do
+              putMsgS "Original"
+              printAbsyn dflags printOptions $ snd $ head lst0
+              --putMsgS $ showSDoc dflags (ppr $ snd $ head lst0)
+              putMsgS "Transformed to CPS"
+              printAbsyn dflags printOptions $ snd $ head lst1
+              --putMsgS $ showSDoc dflags (ppr $ snd $ head lst1)
+            _ -> return ()
+          when ("AUTO_CPS" `elem` anns) $ do
+            putMsgS ("Tail recursive: " ++ show (isTailRecursive dflags bind))
+            putMsgS (showSDoc dflags (ppr bind))
+            printAbsyns dflags printOptions [(bndr, expr)]
+            putMsgS ""
+          return (bndr,expr)
+        printBind :: DynFlags -> CoreBind -> CoreM CoreBind
+        printBind dflags bind = do
+          cps <- transformToCPS dflags bind
+          {-case bind of
+            NonRec bndr expr -> putMsgS $ showSDoc dflags $ ppr expr
+            Rec lst -> do
+              _ <- sequence $ map (\(bndr, expr) -> putMsgS $ showSDoc dflags $ ppr expr) lst
+              return ()-}
           case (bind, cps) of
             (Rec lst0, Rec lst1) -> do
               putMsgS "Original"
@@ -79,9 +105,9 @@ transformToCPS dflags (Rec lst) = do
   where
     transformToCPS' :: (CoreBndr, CoreExpr) -> CoreM (CoreBndr, CoreExpr)
     transformToCPS' (coreBndr, expr) = do
-      transformedBody <- transformBodyToCPS dflags (coreBndr, expr)
+      transformedExpr <- transformBodyToCPS dflags (coreBndr, expr)
       localCoreBndr <- makeLocalCPSFun dflags coreBndr
-      let localTailRecursive = wrapCPS (coreBndr, expr) (localCoreBndr, transformedBody)
+      localTailRecursive <- wrapCPS (coreBndr, expr) (localCoreBndr, transformedBody)
       return $ (localCoreBndr, localTailRecursive)
 
 transformBodyToCPS :: DynFlags -> (CoreBndr, CoreExpr) -> CoreM CoreExpr
@@ -144,16 +170,24 @@ transformBodyToCPS dflags (coreBndr, expr) = do
         (Type typ) -> return $ Type typ
         (Coercion coercion) -> return $ Coercion coercion
 
-wrapCPS :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr) -> CoreExpr
-wrapCPS (originalCoreBndr, originalExpr) (cpsCoreBndr, cpsExpr) = let
-  (args, _) = collectBinders originalExpr
-  argVars = map (\arg -> Var arg) args
-  returnType = getReturnType originalCoreBndr
-  --identityFunction = mkCoreApps (Var {-id-}) (Type returnType) --How do we make the identify function?
-  --prepend identityFunction to argVars
-  callToTailRec = mkCoreApps (Var cpsCoreBndr) argVars
-  letExpression = mkLetRec [(cpsCoreBndr, cpsExpr)] callToTailRec
-  in mkCoreLams args letExpression
+mkId :: Type -> CoreM CoreExpr
+mkId typ = do
+  unique <- getUniqueM
+  let varName = mkSystemVarName unique (mkFastString "a")
+  let var = mkLocalVar VanillaId varName Many typ vanillaIdInfo
+  return $ mkCoreLams [var] (Var var)
+
+wrapCPS :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr) -> CoreM CoreExpr
+wrapCPS (originalCoreBndr, originalExpr) (cpsCoreBndr, cpsExpr) = do
+  let (args, _) = collectBinders originalExpr
+  case getReturnType originalCoreBndr of
+    Nothing -> return originalExpr
+    Just ty -> do
+      idFun <- mkId ty
+      let argVars = map Var args -- ++ [idFun]
+      let callToTailRec = mkCoreApps (Var cpsCoreBndr) argVars
+      let letExpression = mkLetRec [(cpsCoreBndr, cpsExpr)] callToTailRec
+      return $ mkCoreLams args letExpression
 
 makeContinuationType :: CoreBndr -> Type
 makeContinuationType coreBndr = let
