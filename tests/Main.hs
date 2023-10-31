@@ -1,7 +1,7 @@
 module Main where
 
 main :: IO ()
-main = putStrLn "Hello, World!"
+main = print (bar 1)
 
 --manyArgs :: Int -> Float -> Bool -> String -> Bool
 --manyArgs n f b s = False
