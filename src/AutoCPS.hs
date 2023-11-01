@@ -1,10 +1,10 @@
 module AutoCPS (plugin) where
-  
+
 import GHC.Plugins
 import Data.Maybe (fromMaybe)
 import Debug.Trace
 import Data.Data
-import Control.Monad (when, unless, join, forM_)
+import Control.Monad (when, unless, join, forM_, mapAndUnzipM, void)
 import Data.Typeable
 import GHC.Builtin.Types (manyDataConTy)
 import GHC.Types.Id.Info (vanillaIdInfo)
@@ -39,7 +39,7 @@ pass guts = do dflags <- getDynFlags
         autoCPS dflags bind bndr expr = do
           anns <- annotationsOn guts bndr :: CoreM [String]
           cps <- transformToCPS dflags bind
-          
+
           case (bind, cps) of
             (Rec lst0, Rec lst1) -> do
               putMsgS "Original"
@@ -73,6 +73,12 @@ pass guts = do dflags <- getDynFlags
               --printAbsyn dflags printOptions $ snd $ head lst1
               putMsgS $ showSDoc dflags (ppr $ fst $ head lst1)
               putMsgS $ showSDoc dflags (ppr $ snd $ head lst1)
+
+              putMsgS "Test"
+              (expr', newBindings) <- replaceNonTailCalls dflags (snd $ head lst0) (fst $ head lst0)
+              putMsgS $ showSDoc dflags (ppr expr')
+              putMsgS $ "Calls replaced: " ++ show (length newBindings)
+              mapM_ (putMsgS . showSDoc dflags . ppr) newBindings
             _ -> return ()
           return cps
 
@@ -106,19 +112,10 @@ transformBodyToCPS dflags (coreBndr, expr) localCoreBndr = do
         (Var id) -> return $ Var id
         (Lit lit) -> return $ Lit lit
         (App expr0 expr1) -> do
-          expr0' <- aux coreBndr expr0 continuation coreBndrNames
-          expr1' <- aux coreBndr expr1 continuation coreBndrNames
-          --if tExpr1 is recursive call then put expr0' in lambda and pass to expr1'
-          if isCallToAny dflags expr1' coreBndrNames then
-            case getReturnType coreBndr of
-              Nothing -> return $ App expr0 expr1
-              Just ty -> do
-                continuationBndr <- makeVar "contBndr" ty
-                let continuationBody = App (Var continuation) (App expr0' (Var continuationBndr))
-                let newContinuation = Lam continuationBndr continuationBody
-                return $ App expr1' newContinuation
-          else
-            return $ App expr0' expr1'
+          (exprWithBindings, newBindings) <- replaceNonTailCalls dflags (App expr0 expr1) coreBndr
+          let combiningCall = App (Var continuation) exprWithBindings
+          let tailRecExpr = foldl (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) combiningCall newBindings
+          return tailRecExpr
         (Lam lamCoreBndr expr) -> do
           expr' <- aux coreBndr expr continuation coreBndrNames
           return $ Lam lamCoreBndr expr'
@@ -198,6 +195,53 @@ replaceRecursiveCalls dflags expr target result = aux expr where
       in Tick tickish expr'
     (Type typ) -> Type typ
     (Coercion coercion) -> Coercion coercion
+
+replaceNonTailCalls :: DynFlags -> CoreExpr -> CoreBndr -> CoreM (CoreExpr, [(CoreBndr, CoreExpr)])
+replaceNonTailCalls dflags expr coreBndr = aux expr where
+  aux :: CoreExpr -> CoreM (CoreExpr, [(CoreBndr, CoreExpr)])
+  aux expr = case expr of
+    (Var id) -> return (Var id, [])
+    (Lit lit) -> return (Lit lit, [])
+    (App expr0 expr1) -> do
+      (expr0', newBindings0) <- aux expr0
+      (expr1', newBindings1) <- aux expr1
+      case getReturnType coreBndr of
+        Nothing -> return (expr0', newBindings0) --Should never happen
+        Just returnType ->
+          if isCallTo dflags expr1' (getCoreBndrName dflags coreBndr) then do
+            newBindingName <- makeVar "contBndr" returnType
+            return (App expr0' (Var newBindingName), (newBindingName, expr1') : newBindings0 ++ newBindings1)
+          else
+            return (App expr0' expr1', newBindings0 ++ newBindings1)
+    (Lam lamCoreBndr expr) -> do
+      (expr', newBindings) <- aux expr
+      return (Lam lamCoreBndr expr', newBindings)
+    (Let (NonRec bndr expr0) expr1) -> do
+      (expr0', newBindings0) <- aux expr0
+      (expr1', newBindings1) <- aux expr1
+      return (Let (NonRec bndr expr0') expr1', newBindings0 ++ newBindings1)
+    (Let (Rec lst) expr) -> do
+      (lst', newBindings0) <- mapAndUnzipM (\(localCoreBndr, expr) -> do
+        (expr', bindings) <- aux expr
+        return ((localCoreBndr, expr'), bindings)) lst
+      (expr', newBindings1) <- aux expr
+      return (Let (Rec lst') expr', join newBindings0 ++ newBindings1)
+    (Case expr caseCoreBndr typ alternatives) -> do
+      (altAsCPS, newBindings0) <- mapAndUnzipM
+        (\(Alt altCon coreBndrs rhs) -> do
+          (rhs', bindings) <- aux rhs
+          return (Alt altCon coreBndrs rhs', bindings))
+        alternatives
+      (expr', newBindings1) <- aux expr
+      return (Case expr' caseCoreBndr typ altAsCPS, join newBindings0 ++ newBindings1)
+    (Cast expr coercion) -> do
+      (expr', newBindings) <- aux expr
+      return (Cast expr' coercion, newBindings)
+    (Tick tickish expr) -> do
+      (expr', newBindings) <- aux expr
+      return (Tick tickish expr', newBindings)
+    (Type typ) -> return (Type typ, [])
+    (Coercion coercion) -> return (Coercion coercion, [])
 
 mkIdentity :: Type -> CoreM CoreExpr
 mkIdentity typ = do
@@ -352,7 +396,7 @@ containsCallTo dflags (Tick _ expr) coreBndrName = containsCallTo dflags expr co
 containsCallTo dflags (Type typ) coreBndrName = False
 containsCallTo dflags (Coercion coercion) coreBndrName = False
 
-isCallToAny :: DynFlags -> Expr CoreBndr -> [String] -> Bool
+isCallToAny :: DynFlags -> CoreExpr -> [String] -> Bool
 isCallToAny dflags expr = any (isCallTo dflags expr)
 
 isCallTo :: DynFlags -> Expr CoreBndr -> String -> Bool

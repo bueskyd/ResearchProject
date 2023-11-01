@@ -1,7 +1,7 @@
 module Main where
 
 main :: IO ()
-main = print (fib 1)
+main = mapM_ (print . fib) $ take 10 $ iterate (1+) 0
 
 --manyArgs :: Int -> Float -> Bool -> String -> Bool
 --manyArgs n f b s = False
@@ -18,12 +18,12 @@ fib 0 = 0
 fib 1 = 1
 fib n = fib (n - 1) + fib (n - 2)
 
-fibC :: Int -> Int
+{-fibC :: Int -> Int
 fibC n = aux n id where
     aux n c = case n of
         0 -> c 0
         1 -> c 1
-        n -> aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))
+        n -> aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))-}
 
 {-barA :: Int -> Int-> Int
 barA 0 acc = acc
