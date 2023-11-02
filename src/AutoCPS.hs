@@ -35,7 +35,7 @@ pass guts = do dflags <- getDynFlags
                bindsOnlyPass (mapM (printBind dflags)) guts
   where
         printOptions = PrintOptions 0 " - "
-        autoCPS :: DynFlags -> CoreBind -> CoreBndr -> Expr CoreBndr -> CoreM (CoreBndr, Expr CoreBndr)
+        {-autoCPS :: DynFlags -> CoreBind -> CoreBndr -> Expr CoreBndr -> CoreM (CoreBndr, Expr CoreBndr)
         autoCPS dflags bind bndr expr = do
           anns <- annotationsOn guts bndr :: CoreM [String]
           cps <- transformToCPS dflags bind
@@ -54,7 +54,7 @@ pass guts = do dflags <- getDynFlags
             putMsgS (showSDoc dflags (ppr bind))
             printAbsyns dflags printOptions [(bndr, expr)]
             putMsgS ""
-          return (bndr,expr)
+          return (bndr,expr)-}
         printBind :: DynFlags -> CoreBind -> CoreM CoreBind
         printBind dflags bind = do
           cps <- transformToCPS dflags bind

@@ -1,7 +1,18 @@
 module Main where
 
 main :: IO ()
-main = mapM_ (print . fib) $ take 10 $ iterate (1+) 0
+main = print $ meme 7--mapM_ (print . fib) $ take 10 $ iterate (1+) 0
+
+{-
+Factorial
+Fum
+Tower of Hanoi
+Fibonacci
+Palimdrome
+String reversal
+Ackermann function
+Sum of elements in list
+-}
 
 --manyArgs :: Int -> Float -> Bool -> String -> Bool
 --manyArgs n f b s = False
@@ -13,10 +24,10 @@ foo a b = a + b + a-}
 bar 0 = 0
 bar n = n + bar (n - 1)-}
 
-fib :: Int -> Int
+{-fib :: Int -> Int
 fib 0 = 0
 fib 1 = 1
-fib n = fib (n - 1) + fib (n - 2)
+fib n = fib (n - 1) + fib (n - 2)-}
 
 {-fibC :: Int -> Int
 fibC n = aux n id where
@@ -24,6 +35,14 @@ fibC n = aux n id where
         0 -> c 0
         1 -> c 1
         n -> aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))-}
+
+meme :: Int -> Int
+meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1
+
+memeC :: Int -> int
+memeC n = aux n where
+    aux 0 c = c 0
+    aux n c = aux (n - 1) (\x -> aux x ())
 
 {-barA :: Int -> Int-> Int
 barA 0 acc = acc
