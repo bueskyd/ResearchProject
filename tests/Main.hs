@@ -3,7 +3,7 @@ module Main where
 import CPSTests (test)
 
 main :: IO ()
-main = print $ meme 7
+main = test --print $ meme 7
 
 {-
 Factorial
@@ -43,6 +43,8 @@ fibC n = aux n id where
     aux 0 c = c 0
     aux 1 c = c 1
     aux n c = aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))-}
+
+{-# ANN meme "AUTO_CPS" #-}
 
 meme :: Int -> Int
 meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1

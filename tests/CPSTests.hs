@@ -61,6 +61,7 @@ add x y = x + y
 
 -- Direct-Recursive functions
 
+{-# ANN factorial "AUTO_CPS" #-}
 factorial :: Int -> Int
 factorial n = case n of
     0 -> 0

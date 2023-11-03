@@ -34,29 +34,22 @@ install _ todo = return (CoreDoPluginPass "Hi mom" pass : todo)
 pass :: ModGuts -> CoreM ModGuts
 pass guts = do
     dflags <- getDynFlags
-    bindsOnlyPass (mapM (printBind dflags)) guts
+    bindsOnlyPass (mapM (autoCPS dflags)) guts
     where
         printOptions = PrintOptions 0 " - "
-        {-autoCPS :: DynFlags -> CoreBind -> CoreBndr -> Expr CoreBndr -> CoreM (CoreBndr, Expr CoreBndr)
-        autoCPS dflags bind bndr expr = do
-        anns <- annotationsOn guts bndr :: CoreM [String]
-        cps <- transformToCPS dflags bind
-
-        case (bind, cps) of
-            (Rec lst0, Rec lst1) -> do
-            putMsgS "Original"
-            printAbsyn dflags printOptions $ snd $ head lst0
-            --putMsgS $ showSDoc dflags (ppr $ snd $ head lst0)
-            putMsgS "Transformed to CPS"
-            printAbsyn dflags printOptions $ snd $ head lst1
-            --putMsgS $ showSDoc dflags (ppr $ snd $ head lst1)
-            _ -> return ()
-        when ("AUTO_CPS" `elem` anns) $ do
-            putMsgS ("Tail recursive: " ++ show (isTailRecursive dflags bind))
-            putMsgS (showSDoc dflags (ppr bind))
-            printAbsyns dflags printOptions [(bndr, expr)]
-            putMsgS ""
-        return (bndr,expr)-}
+        autoCPS :: DynFlags -> CoreBind -> CoreM CoreBind --(CoreBndr, Expr CoreBndr)
+        autoCPS dflags bind = do
+            do_transform <- case bind of
+                                NonRec _ _ -> return False
+                                Rec lst0 -> foldl (\acc (b,e) -> acc >>= \a -> (annotationsOn guts b :: CoreM [String]) >>= \anns -> return ("AUTO_CPS" `elem` anns || a)) (return False) lst0
+            if do_transform then do 
+                cps <- transformToCPS dflags bind
+                putMsgS "Original"
+                putMsgS $ showSDoc dflags (ppr bind)
+                putMsgS "Transformed to CPS"
+                putMsgS $ showSDoc dflags (ppr cps)
+                return cps
+            else return bind
         printBind :: DynFlags -> CoreBind -> CoreM CoreBind
         printBind dflags bind = do
             cps <- transformToCPS dflags bind
@@ -390,7 +383,7 @@ isTailRecursive dflags expr = case expr of
                     lst
                 in localsAreTR && isTailRecursive' referenceableBndrNames expr
             (Case expr coreBndr _ alternatives) ->
-                isTailRecursive' coreBndrNames expr 
+                isTailRecursive' coreBndrNames expr
                 && all (\(Alt altCon coreBndrs rhs) -> isTailRecursive' coreBndrNames rhs) alternatives
             (Cast expr _) -> isTailRecursive' coreBndrNames expr
             (Tick _ expr) -> isTailRecursive' coreBndrNames expr
