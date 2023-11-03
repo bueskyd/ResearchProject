@@ -5,6 +5,7 @@ main =
     print $ meme 7
     --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
     --print $ bar 10
+    --print $ caseInApp 7
 
 {-
 Factorial
@@ -16,6 +17,13 @@ String reversal
 Ackermann function
 Sum of elements in list
 -}
+
+{-caseInApp :: Int -> Int
+caseInApp n = aux n where
+    aux 0 = 0
+    aux n = 1 + case n of
+        0 -> 0
+        n -> aux (n - 1)-}
 
 --manyArgs :: Int -> Float -> Bool -> String -> Bool
 --manyArgs n f b s = False
