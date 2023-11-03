@@ -1,11 +1,9 @@
 module Main where
 
+import CPSTests (test)
+
 main :: IO ()
-main =
-    print $ meme 7
-    --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
-    --print $ bar 10
-    --print $ caseInApp 7
+main = print $ meme 7
 
 {-
 Factorial
