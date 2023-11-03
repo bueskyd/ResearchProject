@@ -1,7 +1,10 @@
 module Main where
 
 main :: IO ()
-main = print $ meme 7--mapM_ (print . fib) $ take 10 $ iterate (1+) 0
+main =
+    print $ meme 7
+    --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
+    --print $ bar 10
 
 {-
 Factorial
@@ -20,9 +23,9 @@ Sum of elements in list
 {-foo :: Int -> Int -> Int
 foo a b = a + b + a-}
 
-{-bar :: Int -> Int
-bar 0 = 0
-bar n = n + bar (n - 1)-}
+--bar :: Int -> Int
+--bar 0 = 0
+--bar n = n + bar (n - 1)
 
 {-fib :: Int -> Int
 fib 0 = 0
@@ -31,18 +34,20 @@ fib n = fib (n - 1) + fib (n - 2)-}
 
 {-fibC :: Int -> Int
 fibC n = aux n id where
-    aux n c = case n of
-        0 -> c 0
-        1 -> c 1
-        n -> aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))-}
+    aux 0 c = c 0
+    aux 1 c = c 1
+    aux n c = aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))-}
 
 meme :: Int -> Int
 meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1
 
-memeC :: Int -> int
-memeC n = aux n where
-    aux 0 c = c 0
-    aux n c = aux (n - 1) (\x -> aux x ())
+{-memeC :: Int -> Int
+memeC n = aux n id where
+    aux n c =
+        if n <= 0 then
+            c 0
+        else
+            aux (n - 1) (\x -> aux x (\y -> c (y - 1)))-}
 
 {-barA :: Int -> Int-> Int
 barA 0 acc = acc
