@@ -1,5 +1,7 @@
 module Main where
 
+import CPSTests (test)
+
 main :: IO ()
 main =
     --print $ meme 7
@@ -66,8 +68,10 @@ fibC n = aux n id where
     aux 1 c = c 1
     aux n c = aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))-}
 
-{-meme :: Int -> Int
-meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1-}
+{-# ANN meme "AUTO_CPS" #-}
+
+meme :: Int -> Int
+meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1
 
 {-memeC :: Int -> Int
 memeC n = aux n id where
