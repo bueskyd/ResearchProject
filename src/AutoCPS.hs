@@ -102,57 +102,121 @@ transformBodyToCPS dflags (coreBndr, expr) localCoreBndr = do
     case prependArg expr continuation of
         Nothing -> return expr -- expr is not a lambda
         Just expr' -> do
-            semiTransformedBody <- transformBodyToCPS' coreBndr expr' continuation [coreBndrName]
+            --semiTransformedBody <- transformBodyToCPS' coreBndr expr' continuation [coreBndrName]
+            let simplifiedExpr = simplifyCases expr'
+            semiTransformedBody <- transformApplicationsToCPS coreBndr simplifiedExpr continuation [coreBndrName]
             let transformedBody = replaceRecursiveCalls dflags semiTransformedBody coreBndrName localCoreBndr
             return transformedBody
     where
-        transformBodyToCPS' coreBndr expr continuation coreBndrNames = aux expr coreBndrNames True False
+        transformApplicationsToCPS coreBndr expr continuation coreBndrNames = aux expr coreBndrNames True
             where
-                aux expr coreBndrNames inTailPosition inCase = case expr of
+                aux expr coreBndrNames inTailPosition = case expr of
                     (Var id) -> return $ Var id
                     (Lit lit) -> return $ Lit lit
                     (App expr0 expr1) -> do
                         (exprWithBindings, newBindings) <- replaceNonTailCalls dflags (App expr0 expr1) coreBndr
-                        if not (null newBindings) || (inTailPosition && inCase)
-                        then let
-                            combiningCall = App (Var continuation) exprWithBindings
-                            tailRecExpr = foldl (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) combiningCall newBindings
+                        if not (null newBindings) || inTailPosition
+                        then
+                            let combiningCall = App (Var continuation) exprWithBindings
+                                tailRecExpr = foldl (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) combiningCall newBindings
                             in return tailRecExpr
                         else return $ App expr0 expr1
                     (Lam lamCoreBndr expr) -> do
-                        expr' <- aux expr coreBndrNames True False
+                        expr' <- aux expr coreBndrNames True
                         return $ Lam lamCoreBndr expr'
                     (Let (NonRec bndr expr0) expr1) -> do
                         let localCoreBndrName = getCoreBndrName dflags bndr
-                        expr0' <- aux expr0 (localCoreBndrName : coreBndrNames) True False
-                        expr1' <- aux expr1 (localCoreBndrName : coreBndrNames) inTailPosition inCase
+                        expr0' <- aux expr0 (localCoreBndrName : coreBndrNames) True
+                        expr1' <- aux expr1 (localCoreBndrName : coreBndrNames) inTailPosition
                         return $ Let (NonRec bndr expr0') expr1'
                     (Let (Rec lst) expr) -> do
                         lst' <- mapM
                             ( \(localCoreBndr, expr) -> do
                                 let localCoreBndrName = getCoreBndrName dflags localCoreBndr
-                                expr' <- aux expr (localCoreBndrName : coreBndrNames) True False
+                                expr' <- aux expr (localCoreBndrName : coreBndrNames) True
                                 return (localCoreBndr, expr')
                             )
                             lst
-                        expr' <- aux expr coreBndrNames inTailPosition inCase
+                        expr' <- aux expr coreBndrNames inTailPosition
                         return $ Let (Rec lst') expr'
                     (Case expr caseCoreBndr typ alternatives) -> do
                         altAsCPS <- mapM
                             ( \(Alt altCon coreBndrs rhs) -> do
-                                rhs' <- aux rhs coreBndrNames inTailPosition True
-                                return $ Alt altCon coreBndrs rhs')
+                                -- if containsCallToAny dflags rhs coreBndrNames then do
+                                rhs' <- aux rhs coreBndrNames inTailPosition
+                                return $ Alt altCon coreBndrs rhs'
+                                {-else do
+                                let application = App (Var continuation) rhs
+                                return $ Alt altCon coreBndrs application-}
+                            )
                             alternatives
-                        expr' <- aux expr coreBndrNames False inCase
+                        expr' <- aux expr coreBndrNames False
                         return $ Case expr' caseCoreBndr typ altAsCPS
                     (Cast expr coercion) -> do
-                        expr' <- aux expr coreBndrNames False False
+                        expr' <- aux expr coreBndrNames False
                         return $ Cast expr' coercion
                     (Tick tickish expr) -> do
-                        expr' <- aux expr coreBndrNames False False -- No idea if inTailPosition should actually be False
+                        expr' <- aux expr coreBndrNames False -- No idea if inTailPosition should actually be False
                         return $ Tick tickish expr'
                     (Type typ) -> return $ Type typ
                     (Coercion coercion) -> return $ Coercion coercion
+
+simplifyCases :: CoreExpr -> CoreExpr
+simplifyCases expr = aux expr id where
+    aux expr wrapper = case expr of
+        (Var id) -> wrapper $ Var id
+        (Lit lit) -> wrapper $ Lit lit
+        (App expr0 expr1) ->
+            aux expr0 (\x -> aux expr1 (\y -> wrapper $ App x y))
+        (Lam lamCoreBndr expr) -> let
+            expr' = aux expr id
+            in Lam lamCoreBndr expr'
+        (Let (NonRec bndr expr0) expr1) -> Let (NonRec bndr expr0) expr1{-do
+            let localCoreBndrName = getCoreBndrName dflags bndr
+            expr0' <- aux expr0 (localCoreBndrName : coreBndrNames) True False (\x -> return $ Let (NonRec bndr x) expr1)
+            expr1' <- aux expr1 (localCoreBndrName : coreBndrNames) inTailPosition inCase (\x -> return $ Let (NonRec bndr expr0) x)
+            return $ Let (NonRec bndr expr0') expr1'-}
+        (Let (Rec lst) expr) -> Let (Rec lst) expr{-do
+            lst' <- foldl (\acc (index, (localCoreBndr, expr)) -> do
+                let localCoreBndrName = getCoreBndrName dflags localCoreBndr
+                expr' <- aux expr (localCoreBndrName : coreBndrNames) True False (\x -> return $ Let (Rec (setAt index (localCoreBndr, x) lst)) expr)
+                accM <- acc
+                return $ (localCoreBndr, expr') : accM) (return []) (indexed lst)
+            expr' <- aux expr coreBndrNames inTailPosition inCase (\x -> return $ Let (Rec lst) x)
+            return $ Let (Rec lst') expr'-}
+        (Case expr caseCoreBndr typ alternatives) -> let
+            altAsCPS = map
+                (\(Alt altCon coreBndrs rhs) -> case rhs of
+                    Case _ _ _ _ -> let
+                        rhs' = aux rhs wrapper
+                        in Alt altCon coreBndrs rhs'
+                    _ -> let
+                        rhs' = wrapper rhs
+                        rhs'' = aux rhs' id
+                        in Alt altCon coreBndrs rhs'')
+                alternatives
+            --expr' <- aux expr coreBndrNames False inCase (\x -> return $ Case x caseCoreBndr typ altAsCPS)
+            --return expr'
+            in Case expr caseCoreBndr typ altAsCPS
+        (Cast expr coercion) -> let
+            expr' = aux expr (\x -> wrapper $ Cast x coercion)
+            in Cast expr' coercion
+        (Tick tickish expr) -> let
+            expr' = aux expr (\x -> wrapper $ Tick tickish x) -- No idea if inTailPosition should actually be False
+            in Tick tickish expr'
+        (Type typ) -> wrapper $ Type typ
+        (Coercion coercion) -> wrapper $ Coercion coercion
+
+indexed :: [a] -> [(Int, a)]
+indexed = zip (iterate (+1) 0)
+
+setAt :: Int -> a -> [a] -> [a]
+setAt index element lst = aux index lst where
+    aux index [] = lst
+    aux index (x : xs)
+        | index == 0 = element : xs
+        | index < 0 = lst
+        | index > 0 = x : aux (index - 1) xs
 
 replaceRecursiveCalls :: DynFlags -> CoreExpr -> String -> Var -> CoreExpr
 replaceRecursiveCalls dflags expr target result = aux expr where
@@ -298,14 +362,17 @@ makeLocalCPSFun dflags coreBndr = let
     localFunTy = makeCPSFunTy coreBndr
     in makeVar localCoreBndrName localFunTy
 
+--Does not need to return a Maybe
 getReturnType :: CoreBndr -> Maybe Type
-getReturnType coreBndr =
-  fmap (\(_, _, returnType) -> returnType) $ splitFunTy_maybe $ varType coreBndr
+getReturnType coreBndr = let
+    kind = varType coreBndr
+    (_, returnType) = splitFunTys kind
+    in Just returnType
 
 prependArg :: CoreExpr -> Var -> Maybe CoreExpr
 prependArg expr var = aux expr where
     aux expr = case expr of
-        (Lam coreBndr nextParam@(Lam _ _)) -> aux nextParam
+        (Lam coreBndr nextParam@(Lam _ _)) -> aux nextParam >>= (Just . Lam coreBndr)
         (Lam coreBndr expr) -> Just $ Lam coreBndr (Lam var expr)
         _ -> Nothing
 

@@ -3,11 +3,15 @@ module Main where
 import CPSTests (test)
 
 main :: IO ()
-main =
+main = do
     --print $ meme 7
     --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
-    --print $ bar 10
-    print $ caseInApp2 7
+    print $ bar 10
+    --print $ caseInApp2C 7
+    {-print $ caseInAppInCaseInApp 7 4
+    print $ caseInAppInCaseInApp 13 3
+    print $ caseInAppInCaseInApp 6 12
+    print $ caseInAppInCaseInApp 9 43-}
 
 {-
 Factorial
@@ -33,29 +37,48 @@ caseInApp n = 1 + case n of
 caseInAppC n = aux n id where
     aux 0 c = c 0
     aux n c = case n of
-        0 -> c 0
+        0 -> c 1
         n -> aux (n - 1) (\x -> c (x + 1))-}
 
+--{-# ANN caseInApp2 "AUTO_CPS" #-}
 caseInApp2 :: Int -> Int
 caseInApp2 n = 1 + case n of
     0 -> 0
     n -> caseInApp2 (n - 1)
 
-{-caseInApp2C :: Int -> Int
+caseInApp2C :: Int -> Int
 caseInApp2C n = aux n id where
     aux n c = case n of
-        0 -> c 0
-        n -> aux (n - 1) (\x -> c (1 + x))-}
+        0 -> c 1
+        n -> aux (n - 1) (\x -> c (1 + x))
+
+--{-# ANN caseInAppInCaseInApp "AUTO_CPS" #-}
+caseInAppInCaseInApp :: Int -> Int -> Int
+caseInAppInCaseInApp n m = 1 + case n of
+    0 -> 0
+    n -> 1 + case m of
+        0 -> 0
+        m -> caseInAppInCaseInApp (n - 1) (m - 1)
+
+--{-# ANN caseInAppInCaseInApp2 "AUTO_CPS" #-}
+caseInAppInCaseInApp2 :: Int -> Int -> Int
+caseInAppInCaseInApp2 n m = case n of
+    0 -> 1
+    n -> case m of
+        0 -> 2
+        m -> 2 + caseInAppInCaseInApp2 (n - 1) (m - 1)
 
 --manyArgs :: Int -> Float -> Bool -> String -> Bool
 --manyArgs n f b s = False
 
-{-foo :: Int -> Int -> Int
-foo a b = a + b + a-}
+--{-# ANN foo "AUTO_CPS" #-}
+foo :: Int -> Int -> Int
+foo a b = a + b + foo (a - 1) (b - 1)
 
---bar :: Int -> Int
---bar 0 = 0
---bar n = n + bar (n - 1)
+{-# ANN bar "AUTO_CPS" #-}
+bar :: Int -> Int
+bar 0 = 0
+bar n = n + bar (n - 1)
 
 {-fib :: Int -> Int
 fib 0 = 0
@@ -68,10 +91,10 @@ fibC n = aux n id where
     aux 1 c = c 1
     aux n c = aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))-}
 
-{-# ANN meme "AUTO_CPS" #-}
+--{-# ANN meme "AUTO_CPS" #-}
 
-meme :: Int -> Int
-meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1
+--meme :: Int -> Int
+--meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1
 
 {-memeC :: Int -> Int
 memeC n = aux n id where
