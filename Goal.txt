@@ -1,19 +1,19 @@
+caseInApp2C
 \ (n :: Int) ->
   letrec {
     aux [Occ=LoopBreaker] :: Int -> (Int -> Int) -> Int
     [LclId,
      Unf=Unf{Src=<vanilla>, TopLvl=False,
              Value=True, ConLike=True, WorkFree=True, Expandable=True,
-             Guidance=IF_ARGS [0 60] 350 0}]
+             Guidance=IF_ARGS [0 60] 380 0}]
     aux
-      = \ (ds_d114 :: Int) (c :: Int -> Int) ->
-          case == @Int $fEqInt ds_d114 (fromInteger @Int $fNumInt (IS 0#))
-          of {
+      = \ (n :: Int) (c :: Int -> Int) ->
+          case == @Int $fEqInt n (fromInteger @Int $fNumInt (IS 0#)) of {
             False ->
               aux
-                (- @Int $fNumInt ds_d114 (fromInteger @Int $fNumInt (IS 1#)))
+                (- @Int $fNumInt n (fromInteger @Int $fNumInt (IS 1#)))
                 (\ (x :: Int) ->
-                   $ @LiftedRep @Int @Int c (+ @Int $fNumInt ds_d114 x));
+                   c (+ @Int $fNumInt (fromInteger @Int $fNumInt (IS 1#)) x));
             True -> c (fromInteger @Int $fNumInt (IS 0#))
           }; } in
   aux n (id @Int)

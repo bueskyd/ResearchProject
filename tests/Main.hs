@@ -2,10 +2,10 @@ module Main where
 
 main :: IO ()
 main =
-    print $ meme 7
+    --print $ meme 7
     --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
     --print $ bar 10
-    --print $ caseInApp 7
+    print $ caseInApp2 7
 
 {-
 Factorial
@@ -18,12 +18,32 @@ Ackermann function
 Sum of elements in list
 -}
 
+generic :: a -> Int
+generic a = 7
+
 {-caseInApp :: Int -> Int
-caseInApp n = aux n where
-    aux 0 = 0
-    aux n = 1 + case n of
-        0 -> 0
-        n -> aux (n - 1)-}
+caseInApp 0 = 0
+caseInApp n = 1 + case n of
+    0 -> 0
+    n -> caseInApp (n - 1)-}
+
+{-caseInAppC :: Int -> Int
+caseInAppC n = aux n id where
+    aux 0 c = c 0
+    aux n c = case n of
+        0 -> c 0
+        n -> aux (n - 1) (\x -> c (x + 1))-}
+
+caseInApp2 :: Int -> Int
+caseInApp2 n = 1 + case n of
+    0 -> 0
+    n -> caseInApp2 (n - 1)
+
+{-caseInApp2C :: Int -> Int
+caseInApp2C n = aux n id where
+    aux n c = case n of
+        0 -> c 0
+        n -> aux (n - 1) (\x -> c (1 + x))-}
 
 --manyArgs :: Int -> Float -> Bool -> String -> Bool
 --manyArgs n f b s = False
@@ -46,8 +66,8 @@ fibC n = aux n id where
     aux 1 c = c 1
     aux n c = aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))-}
 
-meme :: Int -> Int
-meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1
+{-meme :: Int -> Int
+meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1-}
 
 {-memeC :: Int -> Int
 memeC n = aux n id where
