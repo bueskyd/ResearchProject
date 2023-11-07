@@ -272,14 +272,12 @@ replaceNonTailCalls dflags expr coreBndr = aux expr where
         (App expr0 expr1) -> do
             (expr0', newBindings0) <- aux expr0
             (expr1', newBindings1) <- aux expr1
-            case getReturnType coreBndr of
-                Nothing -> return (expr0', newBindings0) -- Should never happen
-                Just returnType ->
-                    if isCallTo dflags expr1' (getCoreBndrName dflags coreBndr)
-                    then do
-                        newBindingName <- makeVar "contBndr" returnType
-                        return (App expr0' (Var newBindingName), (newBindingName, expr1') : newBindings0 ++ newBindings1)
-                    else return (App expr0' expr1', newBindings0 ++ newBindings1)
+            let returnType = getReturnType coreBndr
+            if isCallTo dflags expr1' (getCoreBndrName dflags coreBndr)
+            then do
+                newBindingName <- makeVar "contBndr" returnType
+                return (App expr0' (Var newBindingName), (newBindingName, expr1') : newBindings0 ++ newBindings1)
+            else return (App expr0' expr1', newBindings0 ++ newBindings1)
         (Lam lamCoreBndr expr) -> do
             (expr', newBindings) <- aux expr
             return (Lam lamCoreBndr expr', newBindings)
@@ -323,14 +321,12 @@ mkIdentity typ = do
 wrapCPS :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr) -> CoreM CoreExpr
 wrapCPS (originalCoreBndr, originalExpr) (cpsCoreBndr, cpsExpr) = do
     let (args, _) = collectBinders originalExpr
-    case getReturnType originalCoreBndr of
-        Nothing -> return originalExpr
-        Just ty -> do
-            idFun <- mkIdentity ty
-            let argVars = map Var args ++ [idFun]
-            let callToTailRec = mkCoreApps (Var cpsCoreBndr) argVars
-            let letExpression = mkLetRec [(cpsCoreBndr, cpsExpr)] callToTailRec
-            return $ mkCoreLams args letExpression
+    let returnType = getReturnType originalCoreBndr
+    idFun <- mkIdentity returnType
+    let argVars = map Var args ++ [idFun]
+    let callToTailRec = mkCoreApps (Var cpsCoreBndr) argVars
+    let letExpression = mkLetRec [(cpsCoreBndr, cpsExpr)] callToTailRec
+    return $ mkCoreLams args letExpression
 
 makeContinuationType :: CoreBndr -> Type
 makeContinuationType coreBndr = let
@@ -363,11 +359,11 @@ makeLocalCPSFun dflags coreBndr = let
     in makeVar localCoreBndrName localFunTy
 
 --Does not need to return a Maybe
-getReturnType :: CoreBndr -> Maybe Type
+getReturnType :: CoreBndr -> Type
 getReturnType coreBndr = let
     kind = varType coreBndr
     (_, returnType) = splitFunTys kind
-    in Just returnType
+    in returnType
 
 prependArg :: CoreExpr -> Var -> Maybe CoreExpr
 prependArg expr var = aux expr where
