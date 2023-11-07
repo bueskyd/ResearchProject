@@ -41,7 +41,13 @@ pass guts = do
         autoCPS dflags bind = do
             do_transform <- case bind of
                                 NonRec _ _ -> return False
-                                Rec lst0 -> foldl (\acc (b,e) -> acc >>= \a -> (annotationsOn guts b :: CoreM [String]) >>= \anns -> return ("AUTO_CPS" `elem` anns || a)) (return False) lst0
+                                Rec lst0 -> foldl
+                                    (\acc (b,e) ->
+                                        acc >>= \a ->
+                                            (annotationsOn guts b :: CoreM [String]) >>= 
+                                                \anns -> return ("AUTO_CPS" `elem` anns || a))
+                                    (return False)
+                                    lst0
             if do_transform then do 
                 cps <- transformToCPS dflags bind
                 putMsgS "Original"
@@ -84,15 +90,18 @@ pass guts = do
 transformToCPS :: DynFlags -> CoreBind -> CoreM CoreBind
 transformToCPS dflags (NonRec coreBndr expr) = return $ NonRec coreBndr expr -- Deal with this later
 transformToCPS dflags (Rec lst) = do
-    transformedFunctions <- mapM transformToCPS' lst
-    return $ Rec transformedFunctions
+    transformedFunctions <- mapM (\function -> do
+        (transformed, aux) <- transformToCPS' function
+        return [transformed, aux]) lst
+    return $ Rec $ join transformedFunctions
     where
-        transformToCPS' :: (CoreBndr, CoreExpr) -> CoreM (CoreBndr, CoreExpr)
+        transformToCPS' :: (CoreBndr, CoreExpr) -> CoreM ((CoreBndr, CoreExpr), (CoreBndr, CoreExpr))
         transformToCPS' (coreBndr, expr) = do
-            localCoreBndr <- makeLocalCPSFun dflags coreBndr
-            transformedBody <- transformBodyToCPS dflags (coreBndr, expr) localCoreBndr
-            localTailRecursive <- wrapCPS dflags (coreBndr, expr) (localCoreBndr, transformedBody)
-            return (coreBndr, localTailRecursive)
+            auxCoreBndr <- makeAuxCPSFun dflags coreBndr
+            wrapperBody <- makeWrapperFunctionBody expr auxCoreBndr
+            auxBody <- transformBodyToCPS dflags (coreBndr, expr) auxCoreBndr
+            --auxTailRecursive <- wrapCPS dflags (coreBndr, expr) (auxCoreBndr, auxBody)
+            return ((coreBndr, wrapperBody), (auxCoreBndr, auxBody))
 
 transformBodyToCPS :: DynFlags -> (CoreBndr, CoreExpr) -> CoreBndr -> CoreM CoreExpr
 transformBodyToCPS dflags (coreBndr, expr) localCoreBndr = do
@@ -311,6 +320,14 @@ replaceNonTailCalls dflags expr coreBndr = aux expr where
         (Type typ) -> return (Type typ, [])
         (Coercion coercion) -> return (Coercion coercion, [])
 
+makeWrapperFunctionBody :: CoreExpr -> CoreBndr -> CoreM CoreExpr
+makeWrapperFunctionBody originalCoreExpr auxCoreBndr = do
+    let (args, _) = collectBinders originalCoreExpr
+    idFun <- mkIdentityFromReturnType auxCoreBndr
+    let argVars = map Var args ++ [idFun]
+    let callToTailRec = mkCoreApps (Var auxCoreBndr) argVars
+    return $ mkCoreLams args callToTailRec
+
 mkIdentityFromReturnType :: CoreBndr -> CoreM CoreExpr
 mkIdentityFromReturnType coreBndr = do
     paramUnique <- getUniqueM
@@ -318,7 +335,7 @@ mkIdentityFromReturnType coreBndr = do
     tyVarUnique <- getUniqueM
     let returnType = getReturnType coreBndr
     let kind = typeKind returnType
-    let typeVariable = mkTyVar (mkSystemVarName tyVarUnique (mkFastString "tyVar")) kind
+    let typeVariable = mkTyVar (mkSystemVarName tyVarUnique (mkFastString "ty")) kind
     let tyVarTy = mkTyVarTy typeVariable
     let var = mkLocalVar VanillaId varName Many tyVarTy vanillaIdInfo
     return $ mkCoreLams [var] (Var var)
@@ -356,8 +373,8 @@ makeCPSFunTy coreBndr = let
         scaledArgs
    in funcType
 
-makeLocalCPSFun :: DynFlags -> CoreBndr -> CoreM CoreBndr
-makeLocalCPSFun dflags coreBndr = let
+makeAuxCPSFun :: DynFlags -> CoreBndr -> CoreM CoreBndr
+makeAuxCPSFun dflags coreBndr = let
     coreBndrName = getCoreBndrName dflags coreBndr
     localCoreBndrName = coreBndrName ++ "Aux"
     localFunTy = makeCPSFunTy coreBndr
