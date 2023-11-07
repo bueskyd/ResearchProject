@@ -91,7 +91,7 @@ transformToCPS dflags (Rec lst) = do
         transformToCPS' (coreBndr, expr) = do
             localCoreBndr <- makeLocalCPSFun dflags coreBndr
             transformedBody <- transformBodyToCPS dflags (coreBndr, expr) localCoreBndr
-            localTailRecursive <- wrapCPS (coreBndr, expr) (localCoreBndr, transformedBody)
+            localTailRecursive <- wrapCPS dflags (coreBndr, expr) (localCoreBndr, transformedBody)
             return (coreBndr, localTailRecursive)
 
 transformBodyToCPS :: DynFlags -> (CoreBndr, CoreExpr) -> CoreBndr -> CoreM CoreExpr
@@ -311,18 +311,23 @@ replaceNonTailCalls dflags expr coreBndr = aux expr where
         (Type typ) -> return (Type typ, [])
         (Coercion coercion) -> return (Coercion coercion, [])
 
-mkIdentity :: Type -> CoreM CoreExpr
-mkIdentity typ = do
-    unique <- getUniqueM
-    let varName = mkSystemVarName unique (mkFastString "identity")
-    let var = mkLocalVar VanillaId varName Many typ vanillaIdInfo
+mkIdentityFromReturnType :: CoreBndr -> CoreM CoreExpr
+mkIdentityFromReturnType coreBndr = do
+    paramUnique <- getUniqueM
+    let varName = mkSystemVarName paramUnique (mkFastString "identityParam")
+    tyVarUnique <- getUniqueM
+    let returnType = getReturnType coreBndr
+    let kind = typeKind returnType
+    let typeVariable = mkTyVar (mkSystemVarName tyVarUnique (mkFastString "tyVar")) kind
+    let tyVarTy = mkTyVarTy typeVariable
+    let var = mkLocalVar VanillaId varName Many tyVarTy vanillaIdInfo
     return $ mkCoreLams [var] (Var var)
 
-wrapCPS :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr) -> CoreM CoreExpr
-wrapCPS (originalCoreBndr, originalExpr) (cpsCoreBndr, cpsExpr) = do
+wrapCPS :: DynFlags -> (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr) -> CoreM CoreExpr
+wrapCPS dflags (originalCoreBndr, originalExpr) (cpsCoreBndr, cpsExpr) = do
     let (args, _) = collectBinders originalExpr
     let returnType = getReturnType originalCoreBndr
-    idFun <- mkIdentity returnType
+    idFun <- mkIdentityFromReturnType originalCoreBndr
     let argVars = map Var args ++ [idFun]
     let callToTailRec = mkCoreApps (Var cpsCoreBndr) argVars
     let letExpression = mkLetRec [(cpsCoreBndr, cpsExpr)] callToTailRec

@@ -24,7 +24,7 @@ Ackermann function
 Sum of elements in list
 -}
 
-{-# ANN letBindingTest "AUTO_CPS" #-}
+--{-# ANN letBindingTest "AUTO_CPS" #-}
 letBindingTest :: Int -> Int -> Int
 letBindingTest n m = case n of
     0 -> m
@@ -32,8 +32,9 @@ letBindingTest n m = case n of
         a = n - 1
         in letBindingTest a a
 
-generic :: a -> Int
-generic a = 7
+--{-# ANN generic "AUTO_CPS" #-}
+generic :: a -> b
+generic a = generic a
 
 {-caseInApp :: Int -> Int
 caseInApp 0 = 0
@@ -83,7 +84,7 @@ caseInAppInCaseInApp2 n m = case n of
 foo :: Int -> Int -> Int
 foo a b = a + b + foo (a - 1) (b - 1)
 
---{-# ANN bar "AUTO_CPS" #-}
+{-# ANN bar "AUTO_CPS" #-}
 bar :: Int -> Int
 bar 0 = 0
 bar n = n + bar (n - 1)
