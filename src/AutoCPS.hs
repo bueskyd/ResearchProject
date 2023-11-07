@@ -358,7 +358,6 @@ makeLocalCPSFun dflags coreBndr = let
     localFunTy = makeCPSFunTy coreBndr
     in makeVar localCoreBndrName localFunTy
 
---Does not need to return a Maybe
 getReturnType :: CoreBndr -> Type
 getReturnType coreBndr = let
     kind = varType coreBndr
