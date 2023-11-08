@@ -6,13 +6,14 @@ main :: IO ()
 main = do
     --print $ meme 7
     --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
-    print $ bar 10
+    --print $ bar 10
     --print $ caseInApp2C 7
     {-print $ caseInAppInCaseInApp 7 4
     print $ caseInAppInCaseInApp 13 3
     print $ caseInAppInCaseInApp 6 12
     print $ caseInAppInCaseInApp 9 43-}
-    mapM_ (\n -> print $ mutuallyRecursive0 n == mutuallyRecursive0C n) $ take 10 $ iterate (+1) 0
+    --mapM_ (\n -> print $ mutuallyRecursive0 n == mutuallyRecursive0C n) $ take 10 $ iterate (+1) 0
+    mapM_ (putStrLn . iHaveNoIdeaWhatToCallThis) $ take 10 $ iterate (+1) 0
 
 {-
 Factorial
@@ -25,7 +26,7 @@ Ackermann function
 Sum of elements in list
 -}
 
-{-# ANN mutuallyRecursive0 "AUTO_CPS" #-}
+--{-# ANN mutuallyRecursive0 "AUTO_CPS" #-}
 mutuallyRecursive0 :: Int -> Int
 mutuallyRecursive0 0 = 0
 mutuallyRecursive0 n = mutuallyRecursive1 (n - 1) + 1
@@ -48,6 +49,14 @@ mutuallyRecursive1C n = mutuallyRecursive0CAux n id
 mutuallyRecursive1CAux n c = case n of
     0 -> c 1
     _ -> mutuallyRecursive0CAux (n - 1) (\x -> c (x + 1))
+
+--{-# ANN iHaveNoIdeaWhatToCallThis "AUTO_CPS" #-}
+iHaveNoIdeaWhatToCallThis :: Int -> String
+iHaveNoIdeaWhatToCallThis 0 = "0"
+iHaveNoIdeaWhatToCallThis n = show (ohLookAnotherFunction (show (n - 1)))
+
+ohLookAnotherFunction :: String -> Int
+ohLookAnotherFunction str = length (iHaveNoIdeaWhatToCallThis 0)
 
 --{-# ANN letBindingTest "AUTO_CPS" #-}
 letBindingTest :: Int -> Int -> Int

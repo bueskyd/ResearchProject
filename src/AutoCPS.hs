@@ -115,7 +115,7 @@ transformToCPS dflags (Rec lst) = do
 transformBodyToCPS :: DynFlags-> (CoreBndr, CoreExpr) -> Map.Map CoreBndr CoreBndr -> CoreM CoreExpr
 transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
     let coreBndrName = getCoreBndrName dflags coreBndr
-    let continuationType = makeContinuationType coreBndr
+    continuationType <- makeContinuationType coreBndr
     continuation <- makeVar "cont" continuationType
     case prependArg expr continuation of
         Nothing -> return expr -- expr is not a lambda
@@ -292,7 +292,13 @@ replaceNonTailCalls dflags expr coreBndrs = aux expr where
             case maybeCall of
                 Just calledCoreBndr -> do
                     let returnType = getReturnType calledCoreBndr
-                    newBindingName <- makeVar "contBndr" returnType
+                    let kind = typeKind returnType
+                    tyVarUnique <- getUniqueM
+                    let typeVariable = mkTyVar (mkSystemVarName tyVarUnique (mkFastString "ty")) kind
+                    let tyVarTy = mkTyVarTy typeVariable
+                    varUnique <- getUniqueM
+                    let varName = mkSystemVarName varUnique (mkFastString "contBndr")
+                    let newBindingName = mkLocalVar VanillaId varName Many tyVarTy vanillaIdInfo
                     return (App expr0' (Var newBindingName), (newBindingName, expr1') : newBindings0 ++ newBindings1)
                 Nothing ->
                     return (App expr0' expr1', newBindings0 ++ newBindings1)
@@ -359,11 +365,18 @@ wrapCPS dflags (originalCoreBndr, originalExpr) (cpsCoreBndr, cpsExpr) = do
     let letExpression = mkLetRec [(cpsCoreBndr, cpsExpr)] callToTailRec
     return $ mkCoreLams args letExpression
 
-makeContinuationType :: CoreBndr -> Type
-makeContinuationType coreBndr = let
-    kind = varType coreBndr
-    (_, returnType) = splitFunTys kind
-    in mkFunctionType Many returnType returnType
+makeContinuationType :: CoreBndr -> CoreM Type
+makeContinuationType coreBndr = do
+    let kind = varType coreBndr
+    let (_, returnType) = splitFunTys kind
+    let kind = typeKind returnType
+    paramTyVarUnique <- getUniqueM
+    returnTyVarUnique <- getUniqueM
+    let paramTypeVariable = mkTyVar (mkSystemVarName paramTyVarUnique (mkFastString "paramTy")) kind
+    let returnTypeVariable = mkTyVar (mkSystemVarName returnTyVarUnique (mkFastString "returnTy")) kind
+    let paramTyVarTy = mkTyVarTy paramTypeVariable
+    let returnTyVarTy = mkTyVarTy returnTypeVariable
+    return $ mkFunctionType Many paramTyVarTy returnTyVarTy
 
 makeCPSFunTy :: CoreBndr -> Type
 makeCPSFunTy coreBndr = let
