@@ -12,6 +12,7 @@ main = do
     print $ caseInAppInCaseInApp 13 3
     print $ caseInAppInCaseInApp 6 12
     print $ caseInAppInCaseInApp 9 43-}
+    mapM_ (\n -> print $ mutuallyRecursive0 n == mutuallyRecursive0C n) $ take 10 $ iterate (+1) 0
 
 {-
 Factorial
@@ -23,6 +24,30 @@ String reversal
 Ackermann function
 Sum of elements in list
 -}
+
+{-# ANN mutuallyRecursive0 "AUTO_CPS" #-}
+mutuallyRecursive0 :: Int -> Int
+mutuallyRecursive0 0 = 0
+mutuallyRecursive0 n = mutuallyRecursive1 (n - 1) + 1
+
+mutuallyRecursive1 :: Int -> Int
+mutuallyRecursive1 0 = 1
+mutuallyRecursive1 n = mutuallyRecursive0 (n - 1) + 1
+
+--{-# ANN mutuallyRecursive0C "AUTO_CPS" #-}
+mutuallyRecursive0C :: Int -> Int
+mutuallyRecursive0C n = mutuallyRecursive0CAux n id
+
+mutuallyRecursive0CAux n c = case n of
+    0 -> c 0
+    _ -> mutuallyRecursive1CAux (n - 1) (\x -> c (x + 1))
+
+mutuallyRecursive1C :: Int -> Int
+mutuallyRecursive1C n = mutuallyRecursive0CAux n id
+
+mutuallyRecursive1CAux n c = case n of
+    0 -> c 1
+    _ -> mutuallyRecursive0CAux (n - 1) (\x -> c (x + 1))
 
 --{-# ANN letBindingTest "AUTO_CPS" #-}
 letBindingTest :: Int -> Int -> Int
@@ -84,7 +109,7 @@ caseInAppInCaseInApp2 n m = case n of
 foo :: Int -> Int -> Int
 foo a b = a + b + foo (a - 1) (b - 1)
 
-{-# ANN bar "AUTO_CPS" #-}
+--{-# ANN bar "AUTO_CPS" #-}
 bar :: Int -> Int
 bar 0 = 0
 bar n = n + bar (n - 1)
