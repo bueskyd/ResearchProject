@@ -120,7 +120,6 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
     case prependArg expr continuation of
         Nothing -> return expr -- expr is not a lambda
         Just expr' -> do
-            --semiTransformedBody <- transformBodyToCPS' coreBndr expr' continuation [coreBndrName]
             let simplifiedExpr = simplifyCases expr'
             let callableFunctions = map fst $ Map.toList funcToAux
             semiTransformedBody <- transformApplicationsToCPS simplifiedExpr callableFunctions continuation
@@ -149,23 +148,18 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                         return $ Let (NonRec bndr expr0') expr1'
                     (Let (Rec lst) expr) -> do
                         lst' <- mapM
-                            ( \(localCoreBndr, expr) -> do
+                            (\(localCoreBndr, expr) -> do
                                 let localCoreBndrName = getCoreBndrName dflags localCoreBndr
                                 expr' <- aux expr (localCoreBndr : callableFunctions) True
-                                return (localCoreBndr, expr')
-                            )
+                                return (localCoreBndr, expr'))
                             lst
                         expr' <- aux expr callableFunctions inTailPosition
                         return $ Let (Rec lst') expr'
                     (Case expr caseCoreBndr typ alternatives) -> do
                         altAsCPS <- mapM
                             ( \(Alt altCon coreBndrs rhs) -> do
-                                -- if containsCallToAny dflags rhs coreBndrNames then do
                                 rhs' <- aux rhs callableFunctions inTailPosition
                                 return $ Alt altCon coreBndrs rhs'
-                                {-else do
-                                let application = App (Var continuation) rhs
-                                return $ Alt altCon coreBndrs application-}
                             )
                             alternatives
                         expr' <- aux expr callableFunctions False
@@ -200,7 +194,7 @@ simplifyCases expr = aux expr id where
         (Case expr caseCoreBndr typ alternatives) -> let
             altAsCPS = map
                 (\(Alt altCon coreBndrs rhs) -> case rhs of
-                    Case _ _ _ _ -> let
+                    Case {} -> let
                         rhs' = aux rhs wrapper
                         in Alt altCon coreBndrs rhs'
                     _ -> let
