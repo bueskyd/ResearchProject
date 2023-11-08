@@ -189,19 +189,14 @@ simplifyCases expr = aux expr id where
         (Lam lamCoreBndr expr) -> let
             expr' = aux expr id
             in Lam lamCoreBndr expr'
-        (Let (NonRec bndr expr0) expr1) -> Let (NonRec bndr expr0) expr1{-do
-            let localCoreBndrName = getCoreBndrName dflags bndr
-            expr0' <- aux expr0 (localCoreBndrName : coreBndrNames) True False (\x -> return $ Let (NonRec bndr x) expr1)
-            expr1' <- aux expr1 (localCoreBndrName : coreBndrNames) inTailPosition inCase (\x -> return $ Let (NonRec bndr expr0) x)
-            return $ Let (NonRec bndr expr0') expr1'-}
-        (Let (Rec lst) expr) -> Let (Rec lst) expr{-do
-            lst' <- foldl (\acc (index, (localCoreBndr, expr)) -> do
-                let localCoreBndrName = getCoreBndrName dflags localCoreBndr
-                expr' <- aux expr (localCoreBndrName : coreBndrNames) True False (\x -> return $ Let (Rec (setAt index (localCoreBndr, x) lst)) expr)
-                accM <- acc
-                return $ (localCoreBndr, expr') : accM) (return []) (indexed lst)
-            expr' <- aux expr coreBndrNames inTailPosition inCase (\x -> return $ Let (Rec lst) x)
-            return $ Let (Rec lst') expr'-}
+        (Let (NonRec bndr expr0) expr1) -> let
+            expr0' = aux expr0 id
+            expr1' = aux expr1 id
+            in Let (NonRec bndr expr0') expr1'
+        (Let (Rec lst) expr) -> let
+            lst' = map (\(coreBndr, expr) -> (coreBndr, aux expr id)) lst
+            expr' = simplifyCases expr
+            in Let (Rec lst') expr'
         (Case expr caseCoreBndr typ alternatives) -> let
             altAsCPS = map
                 (\(Alt altCon coreBndrs rhs) -> case rhs of
@@ -213,14 +208,12 @@ simplifyCases expr = aux expr id where
                         rhs'' = aux rhs' id
                         in Alt altCon coreBndrs rhs'')
                 alternatives
-            --expr' <- aux expr coreBndrNames False inCase (\x -> return $ Case x caseCoreBndr typ altAsCPS)
-            --return expr'
-            in Case expr caseCoreBndr typ altAsCPS
+            in aux expr (\x -> Case x caseCoreBndr typ altAsCPS)
         (Cast expr coercion) -> let
             expr' = aux expr (\x -> wrapper $ Cast x coercion)
             in Cast expr' coercion
         (Tick tickish expr) -> let
-            expr' = aux expr (\x -> wrapper $ Tick tickish x) -- No idea if inTailPosition should actually be False
+            expr' = aux expr (wrapper . Tick tickish) -- No idea if inTailPosition should actually be False
             in Tick tickish expr'
         (Type typ) -> wrapper $ Type typ
         (Coercion coercion) -> wrapper $ Coercion coercion
