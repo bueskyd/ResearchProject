@@ -99,9 +99,17 @@ transformToCPS dflags bind callableFunctions = case bind of
     Rec lst -> do
         let callableFunctions' = map fst lst ++ callableFunctions
         funcToAux <- mapFunctionsToAux dflags callableFunctions'
-        transformedFunctions <- mapM (\function -> do
-            (transformed, aux) <- transformToCPS' funcToAux function
-            return [transformed, aux]) lst
+        transformedFunctions <- mapM (\func@(coreBndr, expr) -> do
+            (transformed, aux) <- transformToCPS' funcToAux func
+            recBody <- transformBodyToCPS dflags func funcToAux
+            if True then case Map.lookup coreBndr funcToAux of
+                Just auxCoreBndr -> do
+                    wrapperBody <- makeWrapperFunctionBody expr auxCoreBndr
+                    return [(coreBndr, wrapperBody), (auxCoreBndr, recBody)]
+                Nothing -> return [(coreBndr, expr)] --Shold not happen
+            else
+                return [(coreBndr, recBody)])
+            lst
         return $ Rec $ join transformedFunctions
     where
         transformToCPS' :: Map.Map CoreBndr CoreBndr -> (CoreBndr, CoreExpr) -> CoreM ((CoreBndr, CoreExpr), (CoreBndr, CoreExpr))
