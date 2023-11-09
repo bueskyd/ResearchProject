@@ -42,16 +42,16 @@ pass guts = do
         autoCPS :: DynFlags -> CoreBind -> CoreM CoreBind --(CoreBndr, Expr CoreBndr)
         autoCPS dflags bind = do
             do_transform <- case bind of
-                                NonRec _ _ -> return False
-                                Rec lst0 -> foldl
-                                    (\acc (b,e) ->
-                                        acc >>= \a ->
-                                            (annotationsOn guts b :: CoreM [String]) >>= 
-                                                \anns -> return ("AUTO_CPS" `elem` anns || a))
-                                    (return False)
-                                    lst0
+                NonRec coreBndr _ ->
+                    (\anns -> "AUTO_CPS" `elem` anns) <$> (annotationsOn guts coreBndr :: CoreM [String])
+                Rec lst0 -> foldl
+                    (\acc (b,e) ->
+                        acc >>= \a ->
+                            (\anns -> "AUTO_CPS" `elem` anns || a) <$> (annotationsOn guts b :: CoreM [String]))
+                    (return False)
+                    lst0
             if do_transform then do 
-                cps <- transformToCPS dflags bind
+                cps <- transformToCPS dflags bind []
                 putMsgS "Original"
                 putMsgS $ showSDoc dflags (ppr bind)
                 putMsgS "Transformed to CPS"
@@ -60,7 +60,7 @@ pass guts = do
             else return bind
         printBind :: DynFlags -> CoreBind -> CoreM CoreBind
         printBind dflags bind = do
-            cps <- transformToCPS dflags bind
+            cps <- transformToCPS dflags bind []
             case bind of
                 NonRec bndr expr -> do
                     putMsgS $ showSDoc dflags $ ppr bndr
@@ -89,17 +89,20 @@ pass guts = do
                 _ -> return ()-}
             return bind
 
-transformToCPS :: DynFlags -> CoreBind -> CoreM CoreBind
-transformToCPS dflags (NonRec coreBndr expr) = return $ NonRec coreBndr expr -- Deal with this later
-transformToCPS dflags (Rec lst) = do
-    let callableFunctions = map fst lst
-    funcToAux <- Map.fromList <$> mapM (\func -> do
-                auxFunction <- makeAuxCPSFun dflags func
-                return (func, auxFunction)) callableFunctions
-    transformedFunctions <- mapM (\function -> do
-        (transformed, aux) <- transformToCPS' funcToAux function
-        return [transformed, aux]) lst
-    return $ Rec $ join transformedFunctions
+transformToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
+transformToCPS dflags bind callableFunctions = case bind of
+    NonRec coreBndr expr -> do
+        let callableFunctions' = coreBndr : callableFunctions
+        funcToAux <- mapFunctionsToAux dflags callableFunctions'
+        (transformed, aux) <- transformToCPS' funcToAux (coreBndr, expr)
+        return $ Rec [transformed, aux]
+    Rec lst -> do
+        let callableFunctions' = map fst lst ++ callableFunctions
+        funcToAux <- mapFunctionsToAux dflags callableFunctions'
+        transformedFunctions <- mapM (\function -> do
+            (transformed, aux) <- transformToCPS' funcToAux function
+            return [transformed, aux]) lst
+        return $ Rec $ join transformedFunctions
     where
         transformToCPS' :: Map.Map CoreBndr CoreBndr -> (CoreBndr, CoreExpr) -> CoreM ((CoreBndr, CoreExpr), (CoreBndr, CoreExpr))
         transformToCPS' funcToAux (coreBndr, expr) = do
@@ -111,6 +114,12 @@ transformToCPS dflags (Rec lst) = do
                     return ((coreBndr, wrapperBody), (auxCoreBndr, auxBody))
                 Nothing ->
                     return ((coreBndr, expr), (coreBndr, expr)) --This should not happen
+
+mapFunctionsToAux :: DynFlags -> [CoreBndr] -> CoreM (Map.Map CoreBndr CoreBndr)
+mapFunctionsToAux dflags functions =
+    Map.fromList <$> mapM (\func -> do
+        auxFunction <- makeAuxCPSFun dflags func
+        return (func, auxFunction)) functions
 
 transformBodyToCPS :: DynFlags-> (CoreBndr, CoreExpr) -> Map.Map CoreBndr CoreBndr -> CoreM CoreExpr
 transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
@@ -143,18 +152,13 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                         expr' <- aux expr callableFunctions True
                         return $ Lam lamCoreBndr expr'
                     (Let (NonRec bndr expr0) expr1) -> do
-                        expr0' <- aux expr0 (bndr : callableFunctions) True
+                        transformedBind <- transformToCPS dflags (NonRec bndr expr0) callableFunctions
                         expr1' <- aux expr1 (bndr : callableFunctions) inTailPosition
-                        return $ Let (NonRec bndr expr0') expr1'
+                        return $ Let transformedBind expr1'
                     (Let (Rec lst) expr) -> do
-                        lst' <- mapM
-                            (\(localCoreBndr, expr) -> do
-                                let localCoreBndrName = getCoreBndrName dflags localCoreBndr
-                                expr' <- aux expr (localCoreBndr : callableFunctions) True
-                                return (localCoreBndr, expr'))
-                            lst
+                        transformedBind <- transformToCPS dflags (Rec lst) callableFunctions
                         expr' <- aux expr callableFunctions inTailPosition
-                        return $ Let (Rec lst') expr'
+                        return $ Let transformedBind expr'
                     (Case expr caseCoreBndr typ alternatives) -> do
                         altAsCPS <- mapM
                             ( \(Alt altCon coreBndrs rhs) -> do

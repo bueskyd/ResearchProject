@@ -13,7 +13,8 @@ main = do
     print $ caseInAppInCaseInApp 6 12
     print $ caseInAppInCaseInApp 9 43-}
     --mapM_ (\n -> print $ mutuallyRecursive0 n == mutuallyRecursive0C n) $ take 10 $ iterate (+1) 0
-    mapM_ (putStrLn . iHaveNoIdeaWhatToCallThis) $ take 10 $ iterate (+1) 0
+    --mapM_ (putStrLn . iHaveNoIdeaWhatToCallThis) $ take 10 $ iterate (+1) 0
+    mapM_ (print . nonRecWithLocalRec) $ take 10 $ iterate (+1) 0
 
 {-
 Factorial
@@ -25,6 +26,12 @@ String reversal
 Ackermann function
 Sum of elements in list
 -}
+
+{-# ANN nonRecWithLocalRec "AUTO_CPS" #-}
+nonRecWithLocalRec :: Int -> Int
+nonRecWithLocalRec n = aux n where
+    aux 0 = 0
+    aux n = 1 + aux (n - 1)
 
 --{-# ANN mutuallyRecursive0 "AUTO_CPS" #-}
 mutuallyRecursive0 :: Int -> Int
