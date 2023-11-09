@@ -90,7 +90,9 @@ pass guts = do
             return bind
 
 transformToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
-transformToCPS dflags bind callableFunctions = case bind of
+transformToCPS dflags bind callableFunctions = 
+    if isTailRecursive dflags bind then return bind else
+    case bind of
     NonRec coreBndr expr -> do
         let callableFunctions' = coreBndr : callableFunctions
         funcToAux <- mapFunctionsToAux dflags callableFunctions'
@@ -126,6 +128,7 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
     let coreBndrName = getCoreBndrName dflags coreBndr
     continuationType <- makeContinuationType coreBndr
     continuation <- makeVar "cont" continuationType
+    putMsgS $ "Transforming body of " ++ showSDoc dflags (ppr coreBndr)
     case prependArg expr continuation of
         Nothing -> return expr -- expr is not a lambda
         Just expr' -> do
@@ -142,7 +145,9 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                     (Lit lit) -> return $ Lit lit
                     (App expr0 expr1) -> do
                         (exprWithBindings, newBindings) <- replaceNonTailCalls dflags (App expr0 expr1) callableFunctions
-                        if not (null newBindings) || inTailPosition
+                        let hasReplacedCalls = not (null newBindings)
+                        let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
+                        if hasReplacedCalls || inTailPosition
                         then let
                             combiningCall = App (Var continuation) exprWithBindings
                             tailRecExpr = foldl (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) combiningCall newBindings
@@ -161,10 +166,9 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                         return $ Let transformedBind expr'
                     (Case expr caseCoreBndr typ alternatives) -> do
                         altAsCPS <- mapM
-                            ( \(Alt altCon coreBndrs rhs) -> do
+                            (\(Alt altCon coreBndrs rhs) -> do
                                 rhs' <- aux rhs callableFunctions inTailPosition
-                                return $ Alt altCon coreBndrs rhs'
-                            )
+                                return $ Alt altCon coreBndrs rhs')
                             alternatives
                         expr' <- aux expr callableFunctions False
                         return $ Case expr' caseCoreBndr typ altAsCPS

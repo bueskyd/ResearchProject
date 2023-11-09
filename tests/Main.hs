@@ -27,7 +27,22 @@ Ackermann function
 Sum of elements in list
 -}
 
-{-# ANN nonRecWithLocalRec "AUTO_CPS" #-}
+{-# ANN innerCallsOuter "AUTO_CPS" #-}
+innerCallsOuter :: Int -> Int
+innerCallsOuter n = inner n where
+    inner n = outerCalledByInner n
+
+outerCalledByInner :: Int -> Int
+outerCalledByInner n = innerCallsOuter n
+
+innerCallsOuterC :: Int -> Int
+innerCallsOuterC n = inner n where
+    inner n = outerCalledByInnerC n
+
+outerCalledByInnerC :: Int -> Int
+outerCalledByInnerC n = innerCallsOuterC n
+
+--{-# ANN nonRecWithLocalRec "AUTO_CPS" #-}
 nonRecWithLocalRec :: Int -> Int
 nonRecWithLocalRec n = aux n where
     aux 0 = 0
