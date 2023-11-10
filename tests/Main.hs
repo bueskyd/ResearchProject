@@ -4,7 +4,7 @@ import CPSTests (test)
 
 main :: IO ()
 main = do
-    --print $ meme 7
+    print $ meme 7
     --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
     --print $ bar 10
     --print $ caseInApp2C 7
@@ -14,7 +14,7 @@ main = do
     print $ caseInAppInCaseInApp 9 43-}
     --mapM_ (\n -> print $ mutuallyRecursive0 n == mutuallyRecursive0C n) $ take 10 $ iterate (+1) 0
     --mapM_ (putStrLn . iHaveNoIdeaWhatToCallThis) $ take 10 $ iterate (+1) 0
-    mapM_ (print . nonRecWithLocalRec) $ take 10 $ iterate (+1) 0
+    --mapM_ (print . nonRecWithLocalRec) $ take 10 $ iterate (+1) 0
 
 {-
 Factorial
@@ -27,7 +27,7 @@ Ackermann function
 Sum of elements in list
 -}
 
-{-# ANN innerCallsOuter "AUTO_CPS" #-}
+--{-# ANN innerCallsOuter "AUTO_CPS" #-}
 innerCallsOuter :: Int -> Int
 innerCallsOuter n = inner n where
     inner n = outerCalledByInner n
@@ -157,9 +157,8 @@ fibC n = aux n id where
     aux n c = aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))-}
 
 --{-# ANN meme "AUTO_CPS" #-}
-
---meme :: Int -> Int
---meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1
+meme :: Int -> Int
+meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1
 
 {-memeC :: Int -> Int
 memeC n = aux n id where

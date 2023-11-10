@@ -44,7 +44,7 @@ pass guts = do
             do_transform <- case bind of
                 NonRec coreBndr _ ->
                     (\anns -> "AUTO_CPS" `elem` anns) <$> (annotationsOn guts coreBndr :: CoreM [String])
-                Rec lst0 -> foldl
+                Rec lst0 -> Data.Foldable.foldl'
                     (\acc (b,e) ->
                         acc >>= \a ->
                             (\anns -> "AUTO_CPS" `elem` anns || a) <$> (annotationsOn guts b :: CoreM [String]))
@@ -90,9 +90,7 @@ pass guts = do
             return bind
 
 transformToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
-transformToCPS dflags bind callableFunctions = 
-    if isTailRecursive dflags bind then return bind else
-    case bind of
+transformToCPS dflags bind callableFunctions = case bind of
     NonRec coreBndr expr -> do
         let callableFunctions' = coreBndr : callableFunctions
         funcToAux <- mapFunctionsToAux dflags callableFunctions'
@@ -147,12 +145,24 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                         (exprWithBindings, newBindings) <- replaceNonTailCalls dflags (App expr0 expr1) callableFunctions
                         let hasReplacedCalls = not (null newBindings)
                         let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
-                        if hasReplacedCalls || inTailPosition
+                        let isRecursiveCall = isCallToAny dflags exprWithBindings callableFunctionNames
+                        if hasReplacedCalls then let
+                            combiningCall = App (Var continuation) exprWithBindings
+                            tailRecExpr = Data.Foldable.foldl' (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) combiningCall newBindings
+                            in return tailRecExpr
+                        else if inTailPosition then
+                            if isRecursiveCall then
+                                return $ App (App expr0 expr1) (Var continuation)
+                            else
+                                return $ App (Var continuation) exprWithBindings
+                        else
+                            return $ App expr0 expr1
+                        {-if hasReplacedCalls || inTailPosition
                         then let
                             combiningCall = App (Var continuation) exprWithBindings
-                            tailRecExpr = foldl (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) combiningCall newBindings
+                            tailRecExpr = Data.Foldable.foldl' (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) combiningCall newBindings
                             in return tailRecExpr
-                        else return $ App expr0 expr1
+                        else return $ App expr0 expr1-}
                     (Lam lamCoreBndr expr) -> do
                         expr' <- aux expr callableFunctions True
                         return $ Lam lamCoreBndr expr'
@@ -562,7 +572,7 @@ printAbsyn dflags printOptions (Case expr coreBndr _ alternatives) = do
     let printAlternatives printOptions [] = return ()
         printAlternatives printOptions ((Alt altCon coreBndrs rhs) : alts) = do
             printLine dflags printOptions "Pattern " altCon
-            foldl (\acc e -> printLine dflags printOptions "Bndr " e) (pure ()) coreBndrs
+            Data.Foldable.foldl' (\acc e -> printLine dflags printOptions "Bndr " e) (pure ()) coreBndrs
             printAbsyn dflags (incInden printOptions) rhs
             printAlternatives printOptions alts
     printAlternatives (incInden printOptions) alternatives
@@ -630,7 +640,7 @@ unique (x : xs) = do
 
 elementIn :: Id -> [Id] -> CoreM Bool
 elementIn a =
-    foldl
+    Data.Foldable.foldl'
         ( \accIo e -> do
             acc <- accIo
             let same = getName a == getName e
