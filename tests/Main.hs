@@ -16,13 +16,7 @@ main = do
     --mapM_ (putStrLn . iHaveNoIdeaWhatToCallThis) $ take 10 $ iterate (+1) 0
     --mapM_ (print . nonRecWithLocalRec) $ take 10 $ iterate (+1) 0
     --test
-    mapM_ print (reverse_lst [1,2,3,4,5,6,7,8,9,0])
-
-{-# ANN reverse_lst "AUTO_CPS" #-}
-reverse_lst :: [a] -> [a]
-reverse_lst lst = case lst of
-    [] -> []
-    h:t -> reverse_lst t ++ [h]
+    --mapM_ print (reverse_lst [1,2,3,4,5,6,7,8,9,0])
 
 {-
 Factorial
@@ -34,6 +28,33 @@ String reversal
 Ackermann function
 Sum of elements in list
 -}
+
+--{-# ANN aaa "AUTO_CPS" #-}
+aaa :: Int -> Int
+aaa n = case n of
+    0 -> aaa (n - 1)
+    _ -> 9
+
+{-# ANN recCallInCase "AUTO_CPS" #-}
+recCallInCase :: Int -> Int
+recCallInCase n = case recCallInCase n of
+    0 -> 1
+    _ -> n
+
+recCallInCaseC :: Int -> Int
+recCallInCaseC n = recCallInCaseCAux n id
+
+recCallInCaseCAux :: Int -> (Int -> Int) -> Int
+recCallInCaseCAux n c =
+    recCallInCaseCAux n (\x -> case x of
+        0 -> c 1
+        _ -> c n)
+
+--{-# ANN expressionInCase "AUTO_CPS" #-}
+expressionInCase :: Int -> Int
+expressionInCase n = case n < 4 of
+    True -> expressionInCase 0
+    False -> expressionInCase 1
 
 --{-# ANN innerCallsOuter "AUTO_CPS" #-}
 innerCallsOuter :: Int -> Int

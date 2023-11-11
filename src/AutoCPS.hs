@@ -145,7 +145,7 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                         (exprWithBindings, newBindings) <- replaceNonTailCalls dflags (App expr0 expr1) callableFunctions
                         let hasReplacedCalls = not (null newBindings)
                         let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
-                        let isRecursiveCall = isCallToAny dflags exprWithBindings callableFunctionNames
+                        let isRecursiveCall = isCallToAny dflags (App expr0 expr1) callableFunctionNames
                         if hasReplacedCalls then let
                             combiningCall = App (Var continuation) exprWithBindings
                             tailRecExpr = Data.Foldable.foldl' (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) combiningCall newBindings
