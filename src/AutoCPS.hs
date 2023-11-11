@@ -108,7 +108,7 @@ transformToCPS dflags bind callableFunctions = case bind of
         transformToCPS' funcToAux (coreBndr, expr) = do
             case Map.lookup coreBndr funcToAux of
                 Just auxCoreBndr -> do
-                    wrapperBody <- makeWrapperFunctionBody expr auxCoreBndr
+                    wrapperBody <- makeWrapperFunctionBody dflags expr auxCoreBndr
                     auxBody <- transformBodyToCPS dflags (coreBndr, expr) funcToAux
                     --auxTailRecursive <- wrapCPS dflags (coreBndr, expr) (auxCoreBndr, auxBody)
                     return ((coreBndr, wrapperBody), (auxCoreBndr, auxBody))
@@ -130,7 +130,7 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
     case prependArg expr continuation of
         Nothing -> return expr -- expr is not a lambda
         Just expr' -> do
-            let simplifiedExpr = simplifyCases expr'
+            let simplifiedExpr = simplifyCases dflags expr'
             let callableFunctions = map fst $ Map.toList funcToAux
             semiTransformedBody <- transformApplicationsToCPS simplifiedExpr callableFunctions continuation
             let transformedBody = replaceRecursiveCalls dflags semiTransformedBody funcToAux
@@ -154,15 +154,9 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                             if isRecursiveCall then
                                 return $ App (App expr0 expr1) (Var continuation)
                             else
-                                return $ App (Var continuation) exprWithBindings
+                                return $ App (Var continuation) exprWithBindings --Maybe use App expr0 expr1 instead (does it even matter?)
                         else
                             return $ App expr0 expr1
-                        {-if hasReplacedCalls || inTailPosition
-                        then let
-                            combiningCall = App (Var continuation) exprWithBindings
-                            tailRecExpr = Data.Foldable.foldl' (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) combiningCall newBindings
-                            in return tailRecExpr
-                        else return $ App expr0 expr1-}
                     (Lam lamCoreBndr expr) -> do
                         expr' <- aux expr callableFunctions True
                         return $ Lam lamCoreBndr expr'
@@ -191,8 +185,9 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                     (Type typ) -> return $ Type typ
                     (Coercion coercion) -> return $ Coercion coercion
 
-simplifyCases :: CoreExpr -> CoreExpr
-simplifyCases expr = aux expr id where
+simplifyCases :: DynFlags -> CoreExpr -> CoreExpr
+simplifyCases dflags expr = aux expr id where
+    aux :: CoreExpr -> (CoreExpr -> CoreExpr) -> CoreExpr
     aux expr wrapper = case expr of
         (Var id) -> wrapper $ Var id
         (Lit lit) -> wrapper $ Lit lit
@@ -200,21 +195,23 @@ simplifyCases expr = aux expr id where
             aux expr0 (\x -> aux expr1 (\y -> wrapper $ App x y))
         (Lam lamCoreBndr expr) -> let
             expr' = aux expr id
-            in Lam lamCoreBndr expr'
+            in wrapper $ Lam lamCoreBndr expr'
         (Let (NonRec bndr expr0) expr1) -> let
             expr0' = aux expr0 id
             expr1' = aux expr1 id
             in Let (NonRec bndr expr0') expr1'
         (Let (Rec lst) expr) -> let
-            lst' = map (\(coreBndr, expr) -> (coreBndr, aux expr id)) lst
-            expr' = simplifyCases expr
+            lst' = map (\(coreBndr, expr) -> let
+                expr' = aux expr id
+                in (coreBndr, expr')) lst
+            expr' = simplifyCases dflags expr
             in Let (Rec lst') expr'
         (Case expr caseCoreBndr typ alternatives) -> let
             altAsCPS = map
                 (\(Alt altCon coreBndrs rhs) -> case rhs of
                     Case {} -> let
                         rhs' = aux rhs wrapper
-                        in Alt altCon coreBndrs rhs'
+                        in  Alt altCon coreBndrs rhs'
                     _ -> let
                         rhs' = wrapper rhs
                         rhs'' = aux rhs' id
@@ -225,7 +222,7 @@ simplifyCases expr = aux expr id where
             expr' = aux expr (\x -> wrapper $ Cast x coercion)
             in Cast expr' coercion
         (Tick tickish expr) -> let
-            expr' = aux expr (wrapper . Tick tickish) -- No idea if inTailPosition should actually be False
+            expr' = aux expr (wrapper . Tick tickish)
             in Tick tickish expr'
         (Type typ) -> wrapper $ Type typ
         (Coercion coercion) -> wrapper $ Coercion coercion
@@ -340,13 +337,23 @@ replaceNonTailCalls dflags expr coreBndrs = aux expr where
         (Type typ) -> return (Type typ, [])
         (Coercion coercion) -> return (Coercion coercion, [])
 
-makeWrapperFunctionBody :: CoreExpr -> CoreBndr -> CoreM CoreExpr
-makeWrapperFunctionBody originalCoreExpr auxCoreBndr = do
-    let (args, _) = collectBinders originalCoreExpr
+makeWrapperFunctionBody :: DynFlags -> CoreExpr -> CoreBndr -> CoreM CoreExpr
+makeWrapperFunctionBody dflags originalCoreExpr auxCoreBndr = do
+    let (tyBinders, valBinders, _) = collectTyAndValBinders originalCoreExpr
     idFun <- mkIdentityFromReturnType auxCoreBndr
-    let argVars = map Var args ++ [idFun]
-    let callToTailRec = mkCoreApps (Var auxCoreBndr) argVars
-    return $ mkCoreLams args callToTailRec
+    --putMsgS $ showSDoc dflags $ ppr idFun
+    --putMsgS $ showSDoc dflags $ ppr auxCoreBndr
+    let args = map (Type . mkTyVarTy) tyBinders ++ map Var valBinders ++ [idFun]
+    --let callToTailRec = mkCoreApps (Var auxCoreBndr) argVars --For some reason this crashes while the line below works
+    let callToTailRec = Data.Foldable.foldl' App (Var auxCoreBndr) args
+    --let f = App (Var auxCoreBndr) (head argVars)
+    --putMsgS $ showSDoc dflags $ ppr f
+    mapM_ (putMsgS . showSDoc dflags . ppr) args
+    --putMsgS "HOLY FUCKING SHIT DID YOU SEE THAT!?"
+    --putMsgS $ showSDoc dflags $ ppr callToTailRec
+    --putMsgS "Did you ever hear the tragedy of Darth Plagueis the Wise?"
+    --putMsgS $ showSDoc dflags $ ppr $ mkCoreLams idArgs callToTailRec
+    return $ mkCoreLams (tyBinders ++ valBinders) callToTailRec
 
 mkIdentityFromReturnType :: CoreBndr -> CoreM CoreExpr
 mkIdentityFromReturnType coreBndr = do
@@ -383,29 +390,43 @@ makeContinuationType coreBndr = do
     let returnTyVarTy = mkTyVarTy returnTypeVariable
     return $ mkFunctionType Many paramTyVarTy returnTyVarTy
 
-makeCPSFunTy :: CoreBndr -> Type
-makeCPSFunTy coreBndr = let
-    kind = varType coreBndr
-    (scaledArgs, res) = splitFunTys kind
-    continuationType = mkFunctionType Many res res -- Make type R -> R
-    continuationResType = mkFunctionType Many continuationType res -- Make type (R -> R) -> R
+makeCPSFunTy :: DynFlags -> CoreBndr -> CoreM Type
+makeCPSFunTy dflags coreBndr = do
+    putMsgS "makeCPSFunTy"
+    let kind = varType coreBndr
+    putMsgS $ showSDoc dflags $ ppr kind
+    --let (tyCoVar, res) = splitForAllTyCoVars kind
+    let (tyCoBinders, res) = splitPiTys kind
+    {-putMsgS $ showSDoc dflags $ ppr res
+    putMsgS $ showSDoc dflags $ ppr $ snd $ splitFunTys res
+    putMsgS $ "Is forall: " ++ show (isForAllTy kind)-}
+    --let (tyCoBinders, r) = splitForAllTyCoVars kind
+    --mapM_ (putMsgS . showSDoc dflags . ppr) tyCoBinders
+    --putMsgS $ showSDoc dflags $ ppr r
+    --putMsgS "hi mom"
+    let continuationType = mkFunctionType Many res res -- Make type R -> R
+    putMsgS $ showSDoc dflags $ ppr continuationType
+    let continuationResType = mkFunctionType Many continuationType res -- Make type (R -> R) -> R
+    putMsgS $ showSDoc dflags $ ppr continuationResType
     -- Make type a -> ... -> (R -> R) -> R
-    funcType = foldr
-        (\scaledArg funArgsType ->
-            let multiplicity = scaledMult scaledArg
-                argType = scaledThing scaledArg
-                newArgsType = mkFunctionType multiplicity argType funArgsType
-            in newArgsType)
-        continuationResType
-        scaledArgs
-   in funcType
+    {-let funcType = foldr
+            (\tyCoBinder funArgsType -> let
+                --newArgsType = mkFunctionType multiplicity argType funArgsType
+                newArgsType = mkForAllTy tyCoBinder Required funArgsType
+                in newArgsType)
+                continuationResType
+                tyCoVar-}
+    let funcType = mkPiTys tyCoBinders continuationResType
+    putMsgS $ showSDoc dflags $ ppr funcType
+    putMsgS "End makeCPSFunTy"
+    return funcType
 
 makeAuxCPSFun :: DynFlags -> CoreBndr -> CoreM CoreBndr
-makeAuxCPSFun dflags coreBndr = let
-    coreBndrName = getCoreBndrName dflags coreBndr
-    localCoreBndrName = coreBndrName ++ "Aux"
-    localFunTy = makeCPSFunTy coreBndr
-    in makeVar localCoreBndrName localFunTy
+makeAuxCPSFun dflags coreBndr = do
+    let coreBndrName = getCoreBndrName dflags coreBndr
+    let localCoreBndrName = coreBndrName ++ "Aux"
+    localFunTy <- makeCPSFunTy dflags coreBndr
+    makeVar localCoreBndrName localFunTy
 
 getReturnType :: CoreBndr -> Type
 getReturnType coreBndr = let

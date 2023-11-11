@@ -15,6 +15,14 @@ main = do
     --mapM_ (\n -> print $ mutuallyRecursive0 n == mutuallyRecursive0C n) $ take 10 $ iterate (+1) 0
     --mapM_ (putStrLn . iHaveNoIdeaWhatToCallThis) $ take 10 $ iterate (+1) 0
     --mapM_ (print . nonRecWithLocalRec) $ take 10 $ iterate (+1) 0
+    --test
+    mapM_ print (reverse_lst [1,2,3,4,5,6,7,8,9,0])
+
+{-# ANN reverse_lst "AUTO_CPS" #-}
+reverse_lst :: [a] -> [a]
+reverse_lst lst = case lst of
+    [] -> []
+    h:t -> reverse_lst t ++ [h]
 
 {-
 Factorial

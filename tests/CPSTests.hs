@@ -84,6 +84,7 @@ fibonnaci n = case n of
     1 -> 1
     n -> fibonnaci (n-1) + fibonnaci (n-2)
 
+--{-# ANN reverse_lst "AUTO_CPS" #-}
 reverse_lst :: [a] -> [a]
 reverse_lst lst = case lst of
     [] -> []
