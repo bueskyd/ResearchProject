@@ -35,6 +35,22 @@ aaa n = case n of
     0 -> aaa (n - 1)
     _ -> 9
 
+--{-# ANN recCallInCase2 "AUTO_CPS" #-}
+recCallInCase2 :: Int -> Int
+recCallInCase2 n = case recCallInCase2 n + 1 of
+    0 -> 1
+    _ -> n
+
+recCallInCase2C :: Int -> Int
+recCallInCase2C n = recCallInCaseC2Aux n id
+
+--{-# ANN recCallInCaseC2Aux "AUTO_CPS" #-}
+recCallInCaseC2Aux :: Int -> (Int -> Int) -> Int
+recCallInCaseC2Aux n c =
+    recCallInCaseC2Aux n (\x -> case x + 1 of
+        0 -> c 1
+        _ -> c n)
+
 {-# ANN recCallInCase "AUTO_CPS" #-}
 recCallInCase :: Int -> Int
 recCallInCase n = case recCallInCase n of
