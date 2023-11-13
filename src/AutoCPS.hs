@@ -90,7 +90,7 @@ mapFunctionsToAux dflags functions =
         auxFunction <- makeAuxCPSFun dflags func
         return (func, auxFunction)) functions
 
-transformBodyToCPS :: DynFlags-> (CoreBndr, CoreExpr) -> Map.Map CoreBndr CoreBndr -> CoreM CoreExpr
+transformBodyToCPS :: DynFlags -> (CoreBndr, CoreExpr) -> Map.Map CoreBndr CoreBndr -> CoreM CoreExpr
 transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
     let coreBndrName = getCoreBndrName dflags coreBndr
     continuationType <- makeContinuationType coreBndr
@@ -282,7 +282,6 @@ replaceRecursiveCalls dflags expr funcToAux = aux expr where
         (Let (Rec lst) expr) -> let
             lst' = map
                 (\(localCoreBndr, expr) -> let
-                    localCoreBndrName = getCoreBndrName dflags localCoreBndr
                     expr' = aux expr
                     in (localCoreBndr, expr')) lst
             expr' = aux expr
