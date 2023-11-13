@@ -132,7 +132,28 @@ nonRecLetBindingTest n m = case n of
         a = n - 1
         in nonRecLetBindingTest a a
 
---{-# ANN letBindingTest "AUTO_CPS" #-}
+--{-# ANN thirdLetBindingTest "AUTO_CPS" #-}
+thirdLetBindingTest :: Int -> Int
+thirdLetBindingTest n = case n of
+    0 -> 0
+    _ -> let
+        b = a * 8 + a
+        a = n * n
+        in a + b + b * thirdLetBindingTest (n - 1)
+
+--{-# ANN anotherLetBindingTest "AUTO_CPS" #-}
+anotherLetBindingTest :: Int -> Int -> Int
+anotherLetBindingTest n m = case n of
+    0 -> m
+    _ -> let
+        a = anotherLetBindingTest (n - 1) (m - 1)
+        f n = case n of
+            0 -> a
+            _ -> n + f (n - 1)
+        b = f n
+        in a + b
+
+{-# ANN letBindingTest "AUTO_CPS" #-}
 letBindingTest :: Int -> Int -> Int
 letBindingTest n m = case n of
     0 -> m
@@ -140,13 +161,13 @@ letBindingTest n m = case n of
         a = letBindingTest (n - 1) (m - 1)
         in a + a
 
-{-letBindingTestC :: Int -> Int -> Int
+letBindingTestC :: Int -> Int -> Int
 letBindingTestC n m = letBindingTestCAux n m id
 
 letBindingTestCAux :: Int -> Int -> (Int -> Int) -> Int
 letBindingTestCAux n m c = case n of
     0 -> c m
-    _ -> letBindingTestCAux a a ()-}
+    _ -> letBindingTestCAux (n - 1) (m - 1) (\a -> a + a)
 
 --{-# ANN generic "AUTO_CPS" #-}
 generic :: a -> b

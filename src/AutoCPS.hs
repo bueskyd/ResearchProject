@@ -58,36 +58,6 @@ pass guts = do
                 putMsgS $ showSDoc dflags (ppr cps)
                 return cps
             else return bind
-        printBind :: DynFlags -> CoreBind -> CoreM CoreBind
-        printBind dflags bind = do
-            cps <- transformToCPS dflags bind []
-            case bind of
-                NonRec bndr expr -> do
-                    putMsgS $ showSDoc dflags $ ppr bndr
-                    putMsgS $ showSDoc dflags $ ppr expr
-                Rec lst -> do
-                    _ <- sequence $ map (\(bndr, expr) -> do
-                        putMsgS $ showSDoc dflags $ ppr bndr
-                        putMsgS $ showSDoc dflags $ ppr expr) lst
-                    return ()
-            {-case (bind, cps) of
-                (Rec lst0, Rec lst1) -> do
-                    putMsgS "Original"
-                    -- printAbsyn dflags printOptions $ snd $ head lst0
-                    putMsgS $ showSDoc dflags (ppr $ fst $ head lst0)
-                    putMsgS $ showSDoc dflags (ppr $ snd $ head lst0)
-                    putMsgS "Transformed to CPS"
-                    -- printAbsyn dflags printOptions $ snd $ head lst1
-                    putMsgS $ showSDoc dflags (ppr $ fst $ head lst1)
-                    putMsgS $ showSDoc dflags (ppr $ snd $ head lst1)
-
-                    putMsgS "Test"
-                    (expr', newBindings) <- replaceNonTailCalls dflags (snd $ head lst0) (fst $ head lst0)
-                    putMsgS $ showSDoc dflags (ppr expr')
-                    putMsgS $ "Calls replaced: " ++ show (length newBindings)
-                    mapM_ (putMsgS . showSDoc dflags . ppr) newBindings
-                _ -> return ()-}
-            return bind
 
 transformToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
 transformToCPS dflags bind callableFunctions = case bind of
@@ -104,7 +74,6 @@ transformToCPS dflags bind callableFunctions = case bind of
             return [transformed, aux]) lst
         return $ Rec $ join transformedFunctions
     where
-        transformToCPS' :: Map.Map CoreBndr CoreBndr -> (CoreBndr, CoreExpr) -> CoreM ((CoreBndr, CoreExpr), (CoreBndr, CoreExpr))
         transformToCPS' funcToAux (coreBndr, expr) = do
             case Map.lookup coreBndr funcToAux of
                 Just auxCoreBndr -> do
@@ -146,13 +115,17 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                             return $ Var id
                     (Lit lit) -> return $ Lit lit
                     (App expr0 expr1) -> do
-                        (exprWithBindings, newBindings) <- replaceNonTailCalls dflags (App expr0 expr1) callableFunctions
+                        (exprWithBindings, newBindings) <-
+                            replaceNonTailCalls dflags (App expr0 expr1) callableFunctions
                         let hasReplacedCalls = not (null newBindings)
                         let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
                         let isRecursiveCall = isCallToAny dflags (App expr0 expr1) callableFunctionNames
                         if hasReplacedCalls then let
                             combiningCall = App (Var continuation) exprWithBindings
-                            tailRecExpr = Data.Foldable.foldl' (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) combiningCall newBindings
+                            tailRecExpr = Data.Foldable.foldl'
+                                (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
+                                combiningCall
+                                newBindings
                             in return tailRecExpr
                         else if inTailPosition then
                             if isRecursiveCall then
@@ -169,7 +142,30 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                             transformedBind <- transformToCPS dflags (NonRec bndr expr0) callableFunctions
                             expr1' <- aux expr1 (bndr : callableFunctions) inTailPosition
                             return $ Let transformedBind expr1'
-                        else return $ Let (NonRec bndr expr0) expr1
+                        else do
+                            (exprWithBindings, newBindings) <-
+                                replaceNonTailCalls dflags expr0 callableFunctions
+                            let hasReplacedCalls = not (null newBindings)
+                            let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
+                            let isRecursiveCall = isCallToAny dflags expr0 callableFunctionNames
+                            expr1' <- aux expr1 callableFunctions inTailPosition
+                            if hasReplacedCalls then do
+                                let newLetBinding = Let (NonRec bndr exprWithBindings) expr1'
+                                let tailRecExpr = Data.Foldable.foldl'
+                                        (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
+                                        newLetBinding
+                                        newBindings
+                                return tailRecExpr
+                            else if isRecursiveCall then do
+                                varUnique <- getUniqueM
+                                let varName = mkSystemVarName varUnique (mkFastString "contBndr")
+                                let varTyp = varType bndr
+                                let newBindingName = mkLocalVar VanillaId varName Many varTyp vanillaIdInfo
+                                let newLetBinding = Let (NonRec bndr (Var newBindingName)) expr1'
+                                let continuationLam = Lam newBindingName newLetBinding
+                                return $ App expr0 continuationLam
+                            else
+                                return $ Let (NonRec bndr expr0) expr1'
                     (Let (Rec lst) expr) -> do
                         transformedBind <- transformToCPS dflags (Rec lst) callableFunctions
                         expr' <- aux expr callableFunctions inTailPosition
@@ -186,7 +182,10 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                         let isRecursiveCall = isCallToAny dflags expr callableFunctionNames
                         if hasReplacedCalls then let
                             exprInCase = Case exprWithBindings caseCoreBndr typ altAsCPS
-                            tailRecExpr = Data.Foldable.foldl' (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) exprInCase newBindings
+                            tailRecExpr = Data.Foldable.foldl'
+                                (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
+                                exprInCase
+                                newBindings
                             in return tailRecExpr
                         else if isRecursiveCall then do
                             varUnique <- getUniqueM
