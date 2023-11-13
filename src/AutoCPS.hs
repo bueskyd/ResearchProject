@@ -132,11 +132,11 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
         Just expr' -> do
             let simplifiedExpr = simplifyCases dflags expr'
             let callableFunctions = map fst $ Map.toList funcToAux
-            semiTransformedBody <- transformApplicationsToCPS simplifiedExpr callableFunctions continuation
+            semiTransformedBody <- transformBodyToCPS' simplifiedExpr callableFunctions continuation
             let transformedBody = replaceRecursiveCalls dflags semiTransformedBody funcToAux
             return transformedBody
     where
-        transformApplicationsToCPS expr callableFunctions continuation = aux expr callableFunctions True
+        transformBodyToCPS' expr callableFunctions continuation = aux expr callableFunctions True
             where
                 aux expr callableFunctions inTailPosition = case expr of
                     (Var id) ->
@@ -164,10 +164,12 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                     (Lam lamCoreBndr expr) -> do
                         expr' <- aux expr callableFunctions True
                         return $ Lam lamCoreBndr expr'
-                    (Let (NonRec bndr expr0) expr1) -> do
-                        transformedBind <- transformToCPS dflags (NonRec bndr expr0) callableFunctions
-                        expr1' <- aux expr1 (bndr : callableFunctions) inTailPosition
-                        return $ Let transformedBind expr1'
+                    (Let (NonRec bndr expr0) expr1) ->
+                        if isFunction bndr then do
+                            transformedBind <- transformToCPS dflags (NonRec bndr expr0) callableFunctions
+                            expr1' <- aux expr1 (bndr : callableFunctions) inTailPosition
+                            return $ Let transformedBind expr1'
+                        else return $ Let (NonRec bndr expr0) expr1
                     (Let (Rec lst) expr) -> do
                         transformedBind <- transformToCPS dflags (Rec lst) callableFunctions
                         expr' <- aux expr callableFunctions inTailPosition
@@ -186,20 +188,15 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                             exprInCase = Case exprWithBindings caseCoreBndr typ altAsCPS
                             tailRecExpr = Data.Foldable.foldl' (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc) exprInCase newBindings
                             in return tailRecExpr
-                        else if isRecursiveCall then let
-                            expr' = App expr (Var continuation)
-                            in return $ Case expr' caseCoreBndr typ altAsCPS
+                        else if isRecursiveCall then do
+                            varUnique <- getUniqueM
+                            let varName = mkSystemVarName varUnique (mkFastString "contBndr")
+                            let newBindingName = mkLocalVar VanillaId varName Many typ vanillaIdInfo
+                            let continuationLam = Lam newBindingName (Case (Var newBindingName) caseCoreBndr typ altAsCPS)
+                            let expr' = App expr continuationLam
+                            return expr'
                         else
                             return $ Case expr caseCoreBndr typ altAsCPS
-                        {-case isCallToAnyMaybe dflags expr' callableFunctions of
-                            Just _ -> do
-                                varUnique <- getUniqueM
-                                let varName = mkSystemVarName varUnique (mkFastString "contBndr")
-                                let newBindingName = mkLocalVar VanillaId varName Many typ vanillaIdInfo
-                                let continuationLam = Lam newBindingName (Case (Var newBindingName) caseCoreBndr typ altAsCPS)
-                                let tailCall = App expr' continuationLam
-                                return tailCall
-                            Nothing -> return $ Case expr' caseCoreBndr typ altAsCPS-}
                     (Cast expr coercion) -> do
                         expr' <- aux expr callableFunctions False
                         return $ Cast expr' coercion
@@ -208,6 +205,9 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                         return $ Tick tickish expr'
                     (Type typ) -> return $ Type typ
                     (Coercion coercion) -> return $ Coercion coercion
+
+isFunction :: CoreBndr -> Bool
+isFunction = isJust . splitPiTy_maybe . varType
 
 simplifyCases :: DynFlags -> CoreExpr -> CoreExpr
 simplifyCases dflags expr = aux expr id where

@@ -51,7 +51,7 @@ recCallInCaseC2Aux n c =
         0 -> c 1
         _ -> c n)
 
-{-# ANN recCallInCase "AUTO_CPS" #-}
+--{-# ANN recCallInCase "AUTO_CPS" #-}
 recCallInCase :: Int -> Int
 recCallInCase n = case recCallInCase n of
     0 -> 1
@@ -125,13 +125,28 @@ iHaveNoIdeaWhatToCallThis n = show (ohLookAnotherFunction (show (n - 1)))
 ohLookAnotherFunction :: String -> Int
 ohLookAnotherFunction str = length (iHaveNoIdeaWhatToCallThis 0)
 
+nonRecLetBindingTest :: Int -> Int -> Int
+nonRecLetBindingTest n m = case n of
+    0 -> m
+    _ -> let
+        a = n - 1
+        in nonRecLetBindingTest a a
+
 --{-# ANN letBindingTest "AUTO_CPS" #-}
 letBindingTest :: Int -> Int -> Int
 letBindingTest n m = case n of
     0 -> m
     _ -> let
-        a = n - 1
-        in letBindingTest a a
+        a = letBindingTest (n - 1) (m - 1)
+        in a + a
+
+{-letBindingTestC :: Int -> Int -> Int
+letBindingTestC n m = letBindingTestCAux n m id
+
+letBindingTestCAux :: Int -> Int -> (Int -> Int) -> Int
+letBindingTestCAux n m c = case n of
+    0 -> c m
+    _ -> letBindingTestCAux a a ()-}
 
 --{-# ANN generic "AUTO_CPS" #-}
 generic :: a -> b
