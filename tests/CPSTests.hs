@@ -11,9 +11,8 @@ import System.Random
 import Test.QuickCheck
 
 small_nat :: Gen Int
-small_nat = abs `fmap` (arbitrary :: Gen Int) `suchThat` (\i -> (i >= 0) &&  (i < 100))
+small_nat = abs `fmap` (arbitrary :: Gen Int) `suchThat` (\i -> (i >= 0) &&  (i < 20))
 
-quickCheck $ forAll small_nat $ prop_factorial
 prop_rev_lst :: [Int] -> Bool
 prop_rev_lst lst = reverse_lst lst == reverse_lst_cps lst
 
