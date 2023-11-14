@@ -133,6 +133,14 @@ nonRecLetBindingTest n m = case n of
         a = n - 1
         in nonRecLetBindingTest a a
 
+{-# ANN appPlusToLetBinding "AUTO_CPS" #-}
+appPlusToLetBinding :: Int -> Int
+appPlusToLetBinding n = case n of
+    0 -> 0
+    _ -> 1 + let
+        a = appPlusToLetBinding (n - 1)
+        in a * a
+
 --{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
 fourthLetBindingTest :: Int -> Int
 fourthLetBindingTest n = case n of
@@ -155,7 +163,7 @@ thirdLetBindingTest n = case n of
         a = n * n
         in a + b + b * thirdLetBindingTest (n - 1)
 
-{-# ANN anotherLetBindingTest "AUTO_CPS" #-}
+--{-# ANN anotherLetBindingTest "AUTO_CPS" #-}
 anotherLetBindingTest :: Int -> Int -> Int
 anotherLetBindingTest n m = case n of
     0 -> m

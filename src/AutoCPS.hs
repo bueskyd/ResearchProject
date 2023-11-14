@@ -99,7 +99,7 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
     case prependArg expr continuation of
         Nothing -> return expr -- expr is not a lambda
         Just expr' -> do
-            let simplifiedExpr = simplifyCases dflags expr'
+            let simplifiedExpr = simplify dflags expr'
             let callableFunctions = map fst $ Map.toList funcToAux
             semiTransformedBody <- transformBodyToCPS' simplifiedExpr callableFunctions continuation
             let transformedBody = replaceRecursiveCalls dflags semiTransformedBody funcToAux
@@ -209,8 +209,8 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
 isFunction :: CoreBndr -> Bool
 isFunction = isJust . splitPiTy_maybe . varType
 
-simplifyCases :: DynFlags -> CoreExpr -> CoreExpr
-simplifyCases dflags expr = aux expr id where
+simplify :: DynFlags -> CoreExpr -> CoreExpr
+simplify dflags expr = aux expr id where
     aux :: CoreExpr -> (CoreExpr -> CoreExpr) -> CoreExpr
     aux expr wrapper = case expr of
         (Var id) -> wrapper $ Var id
@@ -222,14 +222,14 @@ simplifyCases dflags expr = aux expr id where
             in wrapper $ Lam lamCoreBndr expr'
         (Let (NonRec bndr expr0) expr1) -> let
             expr0' = aux expr0 id
-            expr1' = aux expr1 id
-            in wrapper $ Let (NonRec bndr expr0') expr1'
+            expr1' = aux expr1 wrapper
+            in Let (NonRec bndr expr0') expr1'
         (Let (Rec lst) expr) -> let
             lst' = map (\(coreBndr, expr) -> let
                 expr' = aux expr id
                 in (coreBndr, expr')) lst
-            expr' = simplifyCases dflags expr
-            in wrapper $ Let (Rec lst') expr'
+            expr' = aux expr wrapper
+            in Let (Rec lst') expr'
         (Case expr caseCoreBndr typ alternatives) -> let
             altAsCPS = map
                 (\(Alt altCon coreBndrs rhs) -> case rhs of
