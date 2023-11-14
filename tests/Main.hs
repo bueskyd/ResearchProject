@@ -1,10 +1,11 @@
 module Main where
 
-import CPSTests (test)
+import CPSTests (do_test)
+import Test.QuickCheck
 
 main :: IO ()
-main = do
-    print $ meme 7
+main = do_test
+    --print $ meme 7
     --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
     --print $ bar 10
     --print $ caseInApp2C 7
@@ -15,8 +16,6 @@ main = do
     --mapM_ (\n -> print $ mutuallyRecursive0 n == mutuallyRecursive0C n) $ take 10 $ iterate (+1) 0
     --mapM_ (putStrLn . iHaveNoIdeaWhatToCallThis) $ take 10 $ iterate (+1) 0
     --mapM_ (print . nonRecWithLocalRec) $ take 10 $ iterate (+1) 0
-    --test
-    --mapM_ print (reverse_lst [1,2,3,4,5,6,7,8,9,0])
 
 {-
 Factorial

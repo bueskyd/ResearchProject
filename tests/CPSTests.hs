@@ -6,15 +6,70 @@ module CPSTests where
 
 import GHC.List hiding (concat)
 import Prelude hiding (foldl)
---import System.Random
-  
---  print $ take 10 (randomRs ('a', 'z') g)
+import System.Random
 
-test :: IO ()
+import Test.QuickCheck
+
+small_nat :: Gen Int
+small_nat = abs `fmap` (arbitrary :: Gen Int) `suchThat` (\i -> (i >= 0) &&  (i < 100))
+
+quickCheck $ forAll small_nat $ prop_factorial
+prop_rev_lst :: [Int] -> Bool
+prop_rev_lst lst = reverse_lst lst == reverse_lst_cps lst
+
+prop_palindrome :: [Int] -> Bool
+prop_palindrome lst = palindrome lst == palindrome_cps lst
+
+prop_sum_lst :: [Int] -> Bool
+prop_sum_lst lst = sum_list lst == sum_list_cps lst
+
+prop_fibonnaci :: Int -> Bool
+prop_fibonnaci i = fibonnaci i == fibonnaci_cps i
+
+prop_factorial :: Int -> Bool
+prop_factorial i = fibonnaci i == fibonnaci_cps i
+
+do_test :: IO ()
+do_test = do
+    putStrLn "Testing\n"
+    quickCheck $ forAll small_nat $ prop_factorial
+    quickCheck $ forAll small_nat $ prop_fibonnaci
+    quickCheck prop_palindrome
+    quickCheck prop_sum_lst
+    quickCheck prop_rev_lst
+    
+-- Try to use quick-check
+-- Try framework 'critriion' for performance testing
+{-test :: IO ()
 test = do
-    --g <- getStdGen
-    --let meme = take 10 (randoms g :: [Int])
-    ffuzz_print (ffuzz_run [("Factorial", factorial, factorial_cps)] [1, 10, 30])
+    g <- getStdGen
+    positive_ints <- sequence $ replicate 10 $ randomRIO (1,10::Int)
+    positive_list <- mapM (\i -> sequence $ replicate i $ randomRIO (1,10::Int)) positive_ints
+    -- Int -> Int
+    ffuzz_print (ffuzz_run 
+        [
+            ("Factorial", factorial, factorial_cps),
+            ("SumTo", sum_to, sum_to_cps),
+            ("Fibonnaci", fibonnaci, fibonnaci_cps)] 
+        positive_ints)
+    -- [Int] -> [Int]
+    ffuzz_print (ffuzz_run 
+        [
+            --("Reverse", reverse_lst, reverse_lst_cps)
+        ] 
+        positive_list)
+    -- [Int] -> Bool
+    ffuzz_print (ffuzz_run 
+        [
+            ("Palindrome", palindrome, palindrome_cps)
+        ]
+        positive_list)
+    -- [Int] -> Int
+    ffuzz_print (ffuzz_run 
+        [
+            ("SumList", sum_list, sum_list_cps)
+        ] 
+        positive_list)
    {- print $ feq factorial factorial_cps 10
     print $ feq sum_to sum_to_cps 10
     print $ feq fibonnaci fibonnaci_cps 10
@@ -39,7 +94,7 @@ ffuzz_run flst ins =
 
 feq :: Eq b => (a -> b) -> (a -> b) -> a -> Bool
 feq f1 f2 x = 
-    f1 x == f2 x
+    f1 x == f2 x-}
 
 -- Non-recursive functions
 
@@ -61,35 +116,39 @@ add x y = x + y
 
 -- Direct-Recursive functions
 
---{-# ANN factorial "AUTO_CPS" #-}
+{-# ANN factorial "AUTO_CPS" #-}
 factorial :: Int -> Int
 factorial n = case n of
     0 -> 0
     1 -> 1
     n -> n * factorial (n-1)
 
+{-# ANN sum_to "AUTO_CPS" #-}
 sum_to :: Int -> Int
 sum_to n = case n of
     0 -> 0
     n -> n + sum_to (n-1)
 
+{-# ANN sum_list "AUTO_CPS" #-}
 sum_list :: [Int] -> Int
 sum_list lst = case lst of
     [] -> 0
     h:t -> h + sum_list t
 
+{-# ANN fibonnaci "AUTO_CPS" #-}
 fibonnaci :: Int -> Int
 fibonnaci n = case n of
     0 -> 0
     1 -> 1
     n -> fibonnaci (n-1) + fibonnaci (n-2)
 
---{-# ANN reverse_lst "AUTO_CPS" #-}
+{-# ANN reverse_lst "AUTO_CPS" #-}
 reverse_lst :: [a] -> [a]
 reverse_lst lst = case lst of
     [] -> []
     h:t -> reverse_lst t ++ [h]
 
+{-# ANN palindrome "AUTO_CPS" #-}
 palindrome :: Eq a => [a] -> Bool
 palindrome lst = case lst of
     [] -> True
