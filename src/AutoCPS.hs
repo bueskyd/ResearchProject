@@ -161,7 +161,7 @@ transformBodyToCPS dflags expr callableFunctions continuation = aux expr callabl
         Lit lit -> return $ Lit lit
         App expr0 expr1 -> do
             (exprWithBindings, newBindings) <-
-                replaceNonTailCalls dflags (App expr0 expr1) callableFunctions
+                replaceNonTailCalls dflags (App expr0 expr1) callableFunctions inTailPosition
             let hasReplacedCalls = not (null newBindings)
             let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
             let isRecursiveCall = isCallToAny dflags (App expr0 expr1) callableFunctionNames
@@ -188,7 +188,7 @@ transformBodyToCPS dflags expr callableFunctions continuation = aux expr callabl
                 return $ Let (NonRec bndr expr0) expr1'
             else do
                 (exprWithBindings, newBindings) <-
-                    replaceNonTailCalls dflags expr0 callableFunctions
+                    replaceNonTailCalls dflags expr0 callableFunctions False
                 let hasReplacedCalls = not (null newBindings)
                 let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
                 let isRecursiveCall = isCallToAny dflags expr0 callableFunctionNames
@@ -220,7 +220,7 @@ transformBodyToCPS dflags expr callableFunctions continuation = aux expr callabl
                     rhs' <- aux rhs callableFunctions inTailPosition
                     return $ Alt altCon coreBndrs rhs')
                 alternatives
-            (exprWithBindings, newBindings) <- replaceNonTailCalls dflags expr callableFunctions --Do this using wrapper instead
+            (exprWithBindings, newBindings) <- replaceNonTailCalls dflags expr callableFunctions False
             let hasReplacedCalls = not (null newBindings)
             let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
             let isRecursiveCall = isCallToAny dflags expr callableFunctionNames
@@ -263,10 +263,13 @@ simplify dflags expr = aux expr id where
         (Lam lamCoreBndr expr) -> let
             expr' = aux expr id
             in wrapper $ Lam lamCoreBndr expr'
-        (Let (NonRec bndr expr0) expr1) -> let
-            expr0' = aux expr0 id
-            expr1' = aux expr1 wrapper
-            in Let (NonRec bndr expr0') expr1'
+        (Let (NonRec bndr expr0) expr1) ->
+            if isFunction bndr then let
+                expr0' = aux expr0 id
+                expr1' = aux expr1 wrapper
+                in Let (NonRec bndr expr0') expr1'
+            else
+                aux expr0 (\x -> aux expr1 (\y -> wrapper $ Let (NonRec bndr x) y))
         (Let (Rec lst) expr) -> let
             lst' = map (\(coreBndr, expr) -> let
                 expr' = aux expr id
@@ -343,16 +346,16 @@ replaceRecursiveCalls dflags expr funcToAux = aux expr where
         (Type typ) -> Type typ
         (Coercion coercion) -> Coercion coercion
 
-replaceNonTailCalls :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreM (CoreExpr, [(CoreBndr, CoreExpr)])
-replaceNonTailCalls dflags expr coreBndrs = aux expr where
-    aux :: CoreExpr -> CoreM (CoreExpr, [(CoreBndr, CoreExpr)])
-    aux expr = case expr of
+replaceNonTailCalls :: DynFlags -> CoreExpr -> [CoreBndr] -> Bool -> CoreM (CoreExpr, [(CoreBndr, CoreExpr)])
+replaceNonTailCalls dflags expr callableFunctions inTailPosition = aux expr callableFunctions inTailPosition where
+    aux :: CoreExpr -> [CoreBndr] -> Bool -> CoreM (CoreExpr, [(CoreBndr, CoreExpr)])
+    aux expr callableFunctions inTailPosition = case expr of
         (Var id) -> return (Var id, [])
         (Lit lit) -> return (Lit lit, [])
         (App expr0 expr1) -> do
-            (expr0', newBindings0) <- aux expr0
-            (expr1', newBindings1) <- aux expr1
-            let maybeCall = isCallToAnyMaybe dflags expr1' coreBndrs
+            (expr0', newBindings0) <- aux expr0 callableFunctions inTailPosition
+            (expr1', newBindings1) <- aux expr1 callableFunctions False
+            let maybeCall = isCallToAnyMaybe dflags expr1' callableFunctions
             case maybeCall of
                 Just calledCoreBndr -> do
                     let returnType = getReturnType calledCoreBndr
@@ -367,19 +370,34 @@ replaceNonTailCalls dflags expr coreBndrs = aux expr where
                 Nothing ->
                     return (App expr0' expr1', newBindings0 ++ newBindings1)
         (Lam lamCoreBndr expr) -> do
-            (expr', newBindings) <- aux expr
+            (expr', newBindings) <- aux expr callableFunctions True
             return (Lam lamCoreBndr expr', newBindings)
         (Let (NonRec bndr expr0) expr1) -> do
-            (expr0', newBindings0) <- aux expr0
-            (expr1', newBindings1) <- aux expr1
-            return (Let (NonRec bndr expr0') expr1', newBindings0 ++ newBindings1)
+            let expr0InTailPosition = isFunction bndr
+            (expr0', newBindings0) <- aux expr0 callableFunctions expr0InTailPosition
+            (expr1', newBindings1) <- aux expr1 callableFunctions inTailPosition
+            let maybeCall = isCallToAnyMaybe dflags expr1' callableFunctions
+            case maybeCall of
+                Just calledCoreBndr -> do
+                    let returnType = getReturnType calledCoreBndr
+                    let kind = typeKind returnType
+                    tyVarUnique <- getUniqueM
+                    let typeVariable = mkTyVar (mkSystemVarName tyVarUnique (mkFastString "ty")) kind
+                    let tyVarTy = mkTyVarTy typeVariable
+                    varUnique <- getUniqueM
+                    let varName = mkSystemVarName varUnique (mkFastString "contBndr")
+                    let newBindingName = mkLocalVar VanillaId varName Many tyVarTy vanillaIdInfo
+                    return (Let (NonRec bndr expr0') (Var newBindingName), (newBindingName, expr1') : newBindings0 ++ newBindings1)
+                Nothing ->
+                    return (Let (NonRec bndr expr0') expr1', newBindings0 ++ newBindings1)
         (Let (Rec lst) expr) -> do
             (lst', newBindings0) <- mapAndUnzipM
                 (\(localCoreBndr, expr) -> do
-                    (expr', bindings) <- aux expr
+                    let localExprInTailPosition = isFunction localCoreBndr
+                    (expr', bindings) <- aux expr callableFunctions localExprInTailPosition
                     return ((localCoreBndr, expr'), bindings))
                 lst
-            (expr', newBindings1) <- aux expr
+            (expr', newBindings1) <- aux expr callableFunctions inTailPosition
             return (Let (Rec lst') expr', join newBindings0 ++ newBindings1)
         (Case expr caseCoreBndr typ alternatives) -> do
             {-(altAsCPS, newBindings0) <- mapAndUnzipM
@@ -387,14 +405,14 @@ replaceNonTailCalls dflags expr coreBndrs = aux expr where
                     (rhs', bindings) <- aux rhs
                     return (Alt altCon coreBndrs rhs', bindings))
                 alternatives-}
-            (expr', newBindings1) <- aux expr
+            (expr', newBindings1) <- aux expr callableFunctions False
             let altAsCPS = alternatives
             return (Case expr' caseCoreBndr typ altAsCPS, {-join newBindings0 ++ -}newBindings1)
         (Cast expr coercion) -> do
-            (expr', newBindings) <- aux expr
+            (expr', newBindings) <- aux expr callableFunctions False
             return (Cast expr' coercion, newBindings)
         (Tick tickish expr) -> do
-            (expr', newBindings) <- aux expr
+            (expr', newBindings) <- aux expr callableFunctions False
             return (Tick tickish expr', newBindings)
         (Type typ) -> return (Type typ, [])
         (Coercion coercion) -> return (Coercion coercion, [])
