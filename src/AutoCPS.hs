@@ -50,7 +50,7 @@ pass guts = do
                             (\anns -> "AUTO_CPS" `elem` anns || a) <$> (annotationsOn guts b :: CoreM [String]))
                     (return False)
                     lst0
-            if do_transform then do 
+            if do_transform then do
                 cps <- transformToCPS dflags bind []
                 putMsgS "Original"
                 putMsgS $ showSDoc dflags (ppr bind)
@@ -105,44 +105,84 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
             let transformedBody = replaceRecursiveCalls dflags semiTransformedBody funcToAux
             return transformedBody
     where
+        transformLocalFunctionsToCPS expr callableFunctions = case expr of
+            Var id -> return $ Var id
+            Lit lit -> return $ Lit lit
+            App expr0 expr1 -> do
+                expr0' <- transformLocalFunctionsToCPS expr0 callableFunctions
+                expr1' <- transformLocalFunctionsToCPS expr1 callableFunctions
+                return $ App expr0' expr1'
+            Lam lamCoreBndr lamExpr -> do
+                lamExpr' <- transformLocalFunctionsToCPS lamExpr callableFunctions
+                return $ Lam lamCoreBndr lamExpr'
+            Let (NonRec localCoreBndr expr0) expr1 ->
+                if isFunction localCoreBndr then
+                    return $ Let (NonRec localCoreBndr expr0) expr1
+                else do
+                    expr0' <- transformLocalFunctionsToCPS expr0 callableFunctions
+                    expr1' <- transformLocalFunctionsToCPS expr1 callableFunctions
+                    return $ Let (NonRec localCoreBndr expr0') expr1'
+            Let (Rec lst) expr -> do
+                lst' <- mapM (\(localCoreBndr, localExpr) ->
+                    if isFunction localCoreBndr then
+                        return (localCoreBndr, localExpr)
+                    else do
+                        localExpr' <- transformLocalFunctionsToCPS expr callableFunctions
+                        return (localCoreBndr, localExpr')) lst
+                expr' <- transformLocalFunctionsToCPS expr callableFunctions
+                return $ Let (Rec lst') expr'
+            Case expr caseCoreBndr typ alternatives -> do
+                alternatives' <- mapM (\(Alt altCon coreBndrs rhs) -> do
+                    rhs' <- transformLocalFunctionsToCPS rhs callableFunctions
+                    return $ Alt altCon coreBndrs rhs') alternatives
+                expr' <- transformLocalFunctionsToCPS expr callableFunctions
+                return $ Case expr' caseCoreBndr typ alternatives'
+            Cast expr coercion -> do
+                expr' <- transformLocalFunctionsToCPS expr callableFunctions
+                return $ Cast expr' coercion
+            Tick tickish expr -> do
+                expr' <- transformLocalFunctionsToCPS expr callableFunctions
+                return $ Tick tickish expr'
+            Type typ -> return $ Type typ
+            Coercion coercion -> return $ Coercion coercion
+
         transformBodyToCPS' expr callableFunctions continuation = aux expr callableFunctions True
             where
                 aux :: CoreExpr -> [CoreBndr] -> Bool -> CoreM CoreExpr
                 aux expr callableFunctions inTailPosition = case expr of
-                    (Var id) ->
+                    Var id ->
                         if inTailPosition then
                             return $ App (Var continuation) (Var id)
                         else
                             return $ Var id
-                    (Lit lit) -> return $ Lit lit
-                    (App expr0 expr1) -> do
+                    Lit lit -> return $ Lit lit
+                    App expr0 expr1 -> do
                         (exprWithBindings, newBindings) <-
                             replaceNonTailCalls dflags (App expr0 expr1) callableFunctions
                         let hasReplacedCalls = not (null newBindings)
                         let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
                         let isRecursiveCall = isCallToAny dflags (App expr0 expr1) callableFunctionNames
-                        if hasReplacedCalls then do
-                            let combiningCall = App (Var continuation) exprWithBindings
-                            let tailRecExpr = Data.Foldable.foldl'
-                                    (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
-                                    combiningCall
-                                    newBindings
-                            return tailRecExpr
-                        else if inTailPosition then
-                            if isRecursiveCall then
-                                return $ App (App expr0 expr1) (Var continuation)
-                            else
-                                return $ App (Var continuation) exprWithBindings
-                        else
-                            return $ App expr0 expr1
-                    (Lam lamCoreBndr expr) -> do
-                        expr' <- aux expr callableFunctions True
-                        return $ Lam lamCoreBndr expr'
-                    (Let (NonRec bndr expr0) expr1) ->
+                        let transformedApp
+                              | hasReplacedCalls = let
+                                combiningCall = App (Var continuation) exprWithBindings
+                                tailRecExpr = Data.Foldable.foldl'
+                                        (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
+                                        combiningCall
+                                        newBindings
+                                in tailRecExpr
+                              | inTailPosition = if isRecursiveCall then
+                                        App (App expr0 expr1) (Var continuation)
+                                    else
+                                        App (Var continuation) exprWithBindings
+                              | otherwise = App expr0 expr1
+                        return transformedApp
+                    Lam lamCoreBndr lamExpr -> do
+                        lamExpr' <- aux lamExpr callableFunctions True
+                        return $ Lam lamCoreBndr lamExpr'
+                    Let (NonRec bndr expr0) expr1 ->
                         if isFunction bndr then do
-                            transformedBind <- transformToCPS dflags (NonRec bndr expr0) callableFunctions
                             expr1' <- aux expr1 (bndr : callableFunctions) inTailPosition
-                            return $ Let transformedBind expr1'
+                            return $ Let (NonRec bndr expr0) expr1'
                         else do
                             (exprWithBindings, newBindings) <-
                                 replaceNonTailCalls dflags expr0 callableFunctions
@@ -167,11 +207,10 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                                 return $ App expr0 continuationLam
                             else
                                 return $ Let (NonRec bndr expr0) expr1'
-                    (Let (Rec lst) expr) -> do
-                        transformedBind <- transformToCPS dflags (Rec lst) callableFunctions
+                    Let (Rec lst) expr -> do
                         expr' <- aux expr callableFunctions inTailPosition
-                        return $ Let transformedBind expr'
-                    (Case expr caseCoreBndr typ alternatives) -> do
+                        return $ Let (Rec lst) expr'
+                    Case expr caseCoreBndr typ alternatives -> do
                         altAsCPS <- mapM
                             (\(Alt altCon coreBndrs rhs) -> do
                                 rhs' <- aux rhs callableFunctions inTailPosition
@@ -197,14 +236,14 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                             return expr'
                         else
                             return $ Case expr caseCoreBndr typ altAsCPS
-                    (Cast expr coercion) -> do
+                    Cast expr coercion -> do
                         expr' <- aux expr callableFunctions False
                         return $ Cast expr' coercion
-                    (Tick tickish expr) -> do
+                    Tick tickish expr -> do
                         expr' <- aux expr callableFunctions False
                         return $ Tick tickish expr'
-                    (Type typ) -> return $ Type typ
-                    (Coercion coercion) -> return $ Coercion coercion
+                    Type typ -> return $ Type typ
+                    Coercion coercion -> return $ Coercion coercion
 
 isFunction :: CoreBndr -> Bool
 isFunction = isJust . splitPiTy_maybe . varType
