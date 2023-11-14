@@ -107,6 +107,7 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
     where
         transformBodyToCPS' expr callableFunctions continuation = aux expr callableFunctions True
             where
+                aux :: CoreExpr -> [CoreBndr] -> Bool -> CoreM CoreExpr
                 aux expr callableFunctions inTailPosition = case expr of
                     (Var id) ->
                         if inTailPosition then
@@ -120,18 +121,18 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                         let hasReplacedCalls = not (null newBindings)
                         let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
                         let isRecursiveCall = isCallToAny dflags (App expr0 expr1) callableFunctionNames
-                        if hasReplacedCalls then let
-                            combiningCall = App (Var continuation) exprWithBindings
-                            tailRecExpr = Data.Foldable.foldl'
-                                (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
-                                combiningCall
-                                newBindings
-                            in return tailRecExpr
+                        if hasReplacedCalls then do
+                            let combiningCall = App (Var continuation) exprWithBindings
+                            let tailRecExpr = Data.Foldable.foldl'
+                                    (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
+                                    combiningCall
+                                    newBindings
+                            return tailRecExpr
                         else if inTailPosition then
                             if isRecursiveCall then
                                 return $ App (App expr0 expr1) (Var continuation)
                             else
-                                return $ App (Var continuation) exprWithBindings --Maybe use App expr0 expr1 instead (does it even matter?)
+                                return $ App (Var continuation) exprWithBindings
                         else
                             return $ App expr0 expr1
                     (Lam lamCoreBndr expr) -> do
@@ -176,7 +177,7 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                                 rhs' <- aux rhs callableFunctions inTailPosition
                                 return $ Alt altCon coreBndrs rhs')
                             alternatives
-                        (exprWithBindings, newBindings) <- replaceNonTailCalls dflags expr callableFunctions
+                        (exprWithBindings, newBindings) <- replaceNonTailCalls dflags expr callableFunctions --Do this using wrapper instead
                         let hasReplacedCalls = not (null newBindings)
                         let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
                         let isRecursiveCall = isCallToAny dflags expr callableFunctionNames
@@ -200,7 +201,7 @@ transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
                         expr' <- aux expr callableFunctions False
                         return $ Cast expr' coercion
                     (Tick tickish expr) -> do
-                        expr' <- aux expr callableFunctions False -- No idea if inTailPosition should actually be False
+                        expr' <- aux expr callableFunctions False
                         return $ Tick tickish expr'
                     (Type typ) -> return $ Type typ
                     (Coercion coercion) -> return $ Coercion coercion
@@ -222,13 +223,13 @@ simplifyCases dflags expr = aux expr id where
         (Let (NonRec bndr expr0) expr1) -> let
             expr0' = aux expr0 id
             expr1' = aux expr1 id
-            in Let (NonRec bndr expr0') expr1'
+            in wrapper $ Let (NonRec bndr expr0') expr1'
         (Let (Rec lst) expr) -> let
             lst' = map (\(coreBndr, expr) -> let
                 expr' = aux expr id
                 in (coreBndr, expr')) lst
             expr' = simplifyCases dflags expr
-            in Let (Rec lst') expr'
+            in wrapper $ Let (Rec lst') expr'
         (Case expr caseCoreBndr typ alternatives) -> let
             altAsCPS = map
                 (\(Alt altCon coreBndrs rhs) -> case rhs of
@@ -241,12 +242,8 @@ simplifyCases dflags expr = aux expr id where
                         in Alt altCon coreBndrs rhs'')
                 alternatives
             in aux expr (\x -> Case x caseCoreBndr typ altAsCPS)
-        (Cast expr coercion) -> let
-            expr' = aux expr (\x -> wrapper $ Cast x coercion)
-            in Cast expr' coercion
-        (Tick tickish expr) -> let
-            expr' = aux expr (wrapper . Tick tickish)
-            in Tick tickish expr'
+        (Cast expr coercion) -> aux expr (\x -> wrapper $ Cast x coercion)
+        (Tick tickish expr) -> aux expr (wrapper . Tick tickish)
         (Type typ) -> wrapper $ Type typ
         (Coercion coercion) -> wrapper $ Coercion coercion
 
