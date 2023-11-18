@@ -10,8 +10,17 @@ import System.Random
 
 import Test.QuickCheck
 
-small_nat :: Gen Int
-small_nat = abs `fmap` (arbitrary :: Gen Int) `suchThat` (\i -> (i >= 0) &&  (i < 20))
+small_nat :: Int -> Gen Int
+small_nat limit = abs `fmap` (arbitrary :: Gen Int) `suchThat` (\i -> (i >= 0) &&  (i < limit))
+
+prop_is_even :: Int -> Bool
+prop_is_even n = is_even n == is_even_cps n
+
+prop_ping :: Int -> Bool
+prop_ping n = ping n == ping_cps id n
+
+prop_pong :: Int -> Bool
+prop_pong n = pong n == pong_cps id n
 
 prop_rev_lst :: [Int] -> Bool
 prop_rev_lst lst = reverse_lst lst == reverse_lst_cps lst
@@ -31,8 +40,11 @@ prop_factorial i = fibonnaci i == fibonnaci_cps i
 do_test :: IO ()
 do_test = do
     putStrLn "Testing\n"
-    quickCheck $ forAll small_nat $ prop_factorial
-    quickCheck $ forAll small_nat $ prop_fibonnaci
+    quickCheck $ forAll (small_nat 100) prop_is_even
+    quickCheck $ forAll (small_nat 100) prop_ping
+    quickCheck $ forAll (small_nat 100) prop_pong
+    quickCheck $ forAll (small_nat 20) prop_factorial
+    quickCheck $ forAll (small_nat 20) prop_fibonnaci
     quickCheck prop_palindrome
     quickCheck prop_sum_lst
     quickCheck prop_rev_lst
@@ -115,6 +127,23 @@ add x y = x + y
 
 -- Direct-Recursive functions
 
+{-# ANN is_even "AUTO_CPS" #-}
+is_even :: Int -> Bool
+is_even n = case n of
+    0 -> True
+    n -> not $ is_even (n-1)
+
+{-# ANN ping "AUTO_CPS" #-}
+{-# ANN pong "AUTO_CPS" #-}
+ping :: Int -> Int
+ping n = case n of 
+    0 -> 1
+    n -> pong (n-1)
+pong :: Int -> Int
+pong n = case n of 
+    0 -> -1
+    n -> ping (n-1)
+
 {-# ANN factorial "AUTO_CPS" #-}
 factorial :: Int -> Int
 factorial n = case n of
@@ -156,6 +185,21 @@ palindrome lst = case lst of
         h1:t1 -> (h == h1) && palindrome (reverse t1)
 
 -- CPS-Recursive functions
+
+is_even_cps :: Int -> Bool
+is_even_cps n = aux id n where
+    aux c n = case n of
+        0 -> c True
+        n -> aux (\e -> c(not e)) (n-1)
+
+ping_cps :: (Int -> Int) -> Int -> Int
+ping_cps c n = case n of 
+    0 -> c 1
+    n -> pong_cps id (n-1)
+pong_cps :: (Int -> Int) -> Int -> Int
+pong_cps c n = case n of 
+    0 -> c (-1)
+    n -> ping_cps id (n-1)
 
 factorial_cps :: Int -> Int
 factorial_cps n = aux id n where
