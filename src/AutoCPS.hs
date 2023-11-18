@@ -64,7 +64,7 @@ transformTopLevelToCPS dflags bind callableFunctions = case bind of
     NonRec coreBndr expr -> do
         let callableFunctions' = coreBndr : callableFunctions
         (_, transformedFunction) <- transformFunctionToCPS dflags (coreBndr, expr) callableFunctions
-        transformedLocals <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions
+        (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions --Use bndrMap for something
         return $ NonRec coreBndr transformedLocals
     Rec lst -> do
         let callableFunctions' = map fst lst ++ callableFunctions
@@ -78,8 +78,9 @@ transformTopLevelToCPS dflags bind callableFunctions = case bind of
             let auxCoreBndr = fromJust $ Map.lookup coreBndr funcToAux
             wrapperBody <- makeWrapperFunctionBody expr auxCoreBndr
             (_, transformedFunction) <- transformFunctionToCPS dflags (coreBndr, expr) callableFunctions
-            transformedLocals <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions
-            let recursiveCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux
+            (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions
+            let funcToAux' = Map.union funcToAux (Map.fromList bndrMap)
+            let recursiveCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux'
             return ((coreBndr, wrapperBody), (auxCoreBndr, recursiveCallsReplaced))
 
 mapFunctionsToAux :: DynFlags -> [CoreBndr] -> CoreM (Map.Map CoreBndr CoreBndr)
@@ -102,52 +103,53 @@ transformFunctionToCPS dflags (coreBndr, expr) callableFunctions = do
             transformedBody <- transformBodyToCPS dflags simplifiedExpr callableFunctions continuation
             return (transformedCoreBndr, transformedBody)
 
-transformLocalFunctionsToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreM CoreExpr
+transformLocalFunctionsToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreM (CoreExpr, [(CoreBndr, CoreBndr)])
 transformLocalFunctionsToCPS dflags expr callableFunctions = case expr of
-    Var id -> return $ Var id
-    Lit lit -> return $ Lit lit
+    Var id -> return (Var id, [])
+    Lit lit -> return (Lit lit, [])
     App expr0 expr1 -> do
-        expr0' <- transformLocalFunctionsToCPS dflags expr0 callableFunctions
-        expr1' <- transformLocalFunctionsToCPS dflags expr1 callableFunctions
-        return $ App expr0' expr1'
+        (expr0', bndrMap0) <- transformLocalFunctionsToCPS dflags expr0 callableFunctions
+        (expr1', bndrMap1) <- transformLocalFunctionsToCPS dflags expr1 callableFunctions
+        return (App expr0' expr1', bndrMap0 ++ bndrMap1)
     Lam lamCoreBndr lamExpr -> do
-        lamExpr' <- transformLocalFunctionsToCPS dflags lamExpr callableFunctions
-        return $ Lam lamCoreBndr lamExpr'
+        (lamExpr', bndrMap) <- transformLocalFunctionsToCPS dflags lamExpr callableFunctions
+        return (Lam lamCoreBndr lamExpr', bndrMap)
     Let (NonRec localCoreBndr expr0) expr1 ->
         if isFunction localCoreBndr then do
             let callableFunctions' = localCoreBndr : callableFunctions
             (localCoreBndr', expr0') <- transformFunctionToCPS dflags (localCoreBndr, expr0) callableFunctions'
-            expr0'' <- transformLocalFunctionsToCPS dflags expr0' callableFunctions'
-            expr1' <- transformLocalFunctionsToCPS dflags expr1 callableFunctions'
-            return $ Let (NonRec localCoreBndr' expr0'') expr1'
+            (expr0'', bndrMap0) <- transformLocalFunctionsToCPS dflags expr0' callableFunctions'
+            (expr1', bndrMap1) <- transformLocalFunctionsToCPS dflags expr1 callableFunctions'
+            return (Let (NonRec localCoreBndr' expr0'') expr1', (localCoreBndr, localCoreBndr') : bndrMap0 ++ bndrMap1)
         else do
-            expr0' <- transformLocalFunctionsToCPS dflags expr0 callableFunctions
-            expr1' <- transformLocalFunctionsToCPS dflags expr1 callableFunctions
-            return $ Let (NonRec localCoreBndr expr0') expr1'
+            (expr0', bndrMap0) <- transformLocalFunctionsToCPS dflags expr0 callableFunctions
+            (expr1', bndrMap1) <- transformLocalFunctionsToCPS dflags expr1 callableFunctions
+            return (Let (NonRec localCoreBndr expr0') expr1', bndrMap0 ++ bndrMap1)
     Let (Rec lst) expr -> do
         let callableFunctions' = callableFunctions ++ filter isFunction (map fst lst)
-        lst' <- mapM (\(localCoreBndr, localExpr) ->
-            if isFunction localCoreBndr then
-                transformFunctionToCPS dflags (localCoreBndr, localExpr) callableFunctions'
+        (lst', lstBndrMap) <- mapAndUnzipM (\(localCoreBndr, localExpr) ->
+            if isFunction localCoreBndr then do
+                (localCoreBndr', localExpr') <- transformFunctionToCPS dflags (localCoreBndr, localExpr) callableFunctions'
+                return ((localCoreBndr', localExpr'), [(localCoreBndr, localCoreBndr')])
             else do
-                localExpr' <- transformLocalFunctionsToCPS dflags localExpr callableFunctions'
-                return (localCoreBndr, localExpr')) lst
-        expr' <- transformLocalFunctionsToCPS dflags expr callableFunctions'
-        return $ Let (Rec lst') expr'
+                (localExpr', bndrMap) <- transformLocalFunctionsToCPS dflags localExpr callableFunctions'
+                return ((localCoreBndr, localExpr'), bndrMap)) lst
+        (expr', bndrMap) <- transformLocalFunctionsToCPS dflags expr callableFunctions'
+        return (Let (Rec lst') expr', join lstBndrMap ++ bndrMap)
     Case expr caseCoreBndr typ alternatives -> do
-        alternatives' <- mapM (\(Alt altCon coreBndrs rhs) -> do
-            rhs' <- transformLocalFunctionsToCPS dflags rhs callableFunctions
-            return $ Alt altCon coreBndrs rhs') alternatives
-        expr' <- transformLocalFunctionsToCPS dflags expr callableFunctions
-        return $ Case expr' caseCoreBndr typ alternatives'
+        (alternatives', altBndrMap) <- mapAndUnzipM (\(Alt altCon coreBndrs rhs) -> do
+            (rhs', bndrMap) <- transformLocalFunctionsToCPS dflags rhs callableFunctions
+            return (Alt altCon coreBndrs rhs', bndrMap)) alternatives
+        (expr', bndrMap) <- transformLocalFunctionsToCPS dflags expr callableFunctions
+        return (Case expr' caseCoreBndr typ alternatives', join altBndrMap ++ bndrMap)
     Cast expr coercion -> do
-        expr' <- transformLocalFunctionsToCPS dflags expr callableFunctions
-        return $ Cast expr' coercion
+        (expr', bndrMap) <- transformLocalFunctionsToCPS dflags expr callableFunctions
+        return (Cast expr' coercion, bndrMap)
     Tick tickish expr -> do
-        expr' <- transformLocalFunctionsToCPS dflags expr callableFunctions
-        return $ Tick tickish expr'
-    Type typ -> return $ Type typ
-    Coercion coercion -> return $ Coercion coercion
+        (expr', bndrMap) <- transformLocalFunctionsToCPS dflags expr callableFunctions
+        return (Tick tickish expr', bndrMap)
+    Type typ -> return (Type typ, [])
+    Coercion coercion -> return (Coercion coercion, [])
 
 transformBodyToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreBndr -> CoreM CoreExpr
 transformBodyToCPS dflags expr callableFunctions continuation = aux expr callableFunctions True where

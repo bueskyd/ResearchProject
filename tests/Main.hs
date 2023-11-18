@@ -167,7 +167,7 @@ fourthLetBindingTestC n c = case n of
             _ -> f (n - 1) (\x -> k (x + n))
         in f a (\x -> fourthLetBindingTestC (n - 1) (\y -> c (a + b + b * y + x * x)))
 
---{-# ANN thirdLetBindingTest "AUTO_CPS" #-}
+{-# ANN thirdLetBindingTest "AUTO_CPS" #-}
 thirdLetBindingTest :: Int -> Int
 thirdLetBindingTest n = case n of
     0 -> 0
@@ -176,7 +176,7 @@ thirdLetBindingTest n = case n of
         a = n * n
         in a + b + b * thirdLetBindingTest (n - 1)
 
-{-# ANN anotherLetBindingTest "AUTO_CPS" #-}
+--{-# ANN anotherLetBindingTest "AUTO_CPS" #-}
 anotherLetBindingTest :: Int -> Int -> Int
 anotherLetBindingTest n m = case n of
     0 -> m
