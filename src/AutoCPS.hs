@@ -129,8 +129,9 @@ transformLocalFunctionsToCPS dflags expr callableFunctions = case expr of
         let callableFunctions' = callableFunctions ++ filter isFunction (map fst lst)
         (lst', lstBndrMap) <- mapAndUnzipM (\(localCoreBndr, localExpr) ->
             if isFunction localCoreBndr then do
-                (localCoreBndr', localExpr') <- transformFunctionToCPS dflags (localCoreBndr, localExpr) callableFunctions'
-                return ((localCoreBndr', localExpr'), [(localCoreBndr, localCoreBndr')])
+                (localExpr', bndrMap) <- transformLocalFunctionsToCPS dflags localExpr callableFunctions'
+                (localCoreBndr', localExpr') <- transformFunctionToCPS dflags (localCoreBndr, localExpr') callableFunctions'
+                return ((localCoreBndr', localExpr'), (localCoreBndr, localCoreBndr') : bndrMap)
             else do
                 (localExpr', bndrMap) <- transformLocalFunctionsToCPS dflags localExpr callableFunctions'
                 return ((localCoreBndr, localExpr'), bndrMap)) lst
