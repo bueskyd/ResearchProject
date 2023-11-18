@@ -266,22 +266,37 @@ simplify dflags expr = aux expr id where
         (Let (NonRec bndr expr0) expr1) ->
             if isFunction bndr then let
                 expr0' = aux expr0 id
-                expr1' = aux expr1 wrapper
-                in Let (NonRec bndr expr0') expr1'
-            else
-                aux expr0 (\x -> aux expr1 (\y -> wrapper $ Let (NonRec bndr x) y))
+                in aux expr1 (\x -> Let (NonRec bndr expr0') x)
+            else case expr0 of
+                Let (Rec lst) innerExpr -> let
+                    expr1' = aux expr1 wrapper
+                    in Let (Rec lst) (Let (NonRec bndr innerExpr) expr1')
+                Let (NonRec innerBndr innerExpr0) innerExpr1 -> let
+                    expr0' = aux expr0 id
+                    expr1' = aux expr1 wrapper
+                    in Let (NonRec bndr expr0') expr1'
+                _ -> let
+                    expr1' = wrapper expr1
+                    expr1'' = aux expr1' id
+                    in Let (NonRec bndr expr0) expr1''
         (Let (Rec lst) expr) -> let
             lst' = map (\(coreBndr, expr) -> let
                 expr' = aux expr id
                 in (coreBndr, expr')) lst
-            expr' = aux expr wrapper
-            in Let (Rec lst') expr'
+            in case expr of
+                Let {} -> let
+                    expr' = aux expr wrapper
+                    in Let (Rec lst') expr'
+                _ -> let
+                    expr' = wrapper expr
+                    expr'' = aux expr' id
+                    in Let (Rec lst') expr''
         (Case expr caseCoreBndr typ alternatives) -> let
             altAsCPS = map
                 (\(Alt altCon coreBndrs rhs) -> case rhs of
                     Case {} -> let
                         rhs' = aux rhs wrapper
-                        in  Alt altCon coreBndrs rhs'
+                        in Alt altCon coreBndrs rhs'
                     _ -> let
                         rhs' = wrapper rhs
                         rhs'' = aux rhs' id
