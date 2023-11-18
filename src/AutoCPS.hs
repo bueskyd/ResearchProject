@@ -259,14 +259,14 @@ simplify :: DynFlags -> CoreExpr -> CoreExpr
 simplify dflags expr = aux expr id where
     aux :: CoreExpr -> (CoreExpr -> CoreExpr) -> CoreExpr
     aux expr wrapper = case expr of
-        (Var id) -> wrapper $ Var id
-        (Lit lit) -> wrapper $ Lit lit
-        (App expr0 expr1) ->
+        Var id -> wrapper $ Var id
+        Lit lit -> wrapper $ Lit lit
+        App expr0 expr1 ->
             aux expr0 (\x -> aux expr1 (\y -> wrapper $ App x y))
-        (Lam lamCoreBndr expr) -> let
+        Lam lamCoreBndr expr -> let
             expr' = aux expr id
             in wrapper $ Lam lamCoreBndr expr'
-        (Let (NonRec bndr expr0) expr1) ->
+        Let (NonRec bndr expr0) expr1 ->
             if isFunction bndr then let
                 expr0' = aux expr0 id
                 in aux expr1 (\x -> Let (NonRec bndr expr0') x)
@@ -282,7 +282,7 @@ simplify dflags expr = aux expr id where
                     expr1' = wrapper expr1
                     expr1'' = aux expr1' id
                     in Let (NonRec bndr expr0) expr1''
-        (Let (Rec lst) expr) -> let
+        Let (Rec lst) expr -> let
             lst' = map (\(coreBndr, expr) -> let
                 expr' = aux expr id
                 in (coreBndr, expr')) lst
@@ -294,7 +294,7 @@ simplify dflags expr = aux expr id where
                     expr' = wrapper expr
                     expr'' = aux expr' id
                     in Let (Rec lst') expr''
-        (Case expr caseCoreBndr typ alternatives) -> let
+        Case expr caseCoreBndr typ alternatives -> let
             altAsCPS = map
                 (\(Alt altCon coreBndrs rhs) -> case rhs of
                     Case {} -> let
@@ -306,10 +306,10 @@ simplify dflags expr = aux expr id where
                         in Alt altCon coreBndrs rhs'')
                 alternatives
             in aux expr (\x -> Case x caseCoreBndr typ altAsCPS)
-        (Cast expr coercion) -> aux expr (\x -> wrapper $ Cast x coercion)
-        (Tick tickish expr) -> aux expr (wrapper . Tick tickish)
-        (Type typ) -> wrapper $ Type typ
-        (Coercion coercion) -> wrapper $ Coercion coercion
+        Cast expr coercion -> aux expr (\x -> wrapper $ Cast x coercion)
+        Tick tickish expr -> aux expr (wrapper . Tick tickish)
+        Type typ -> wrapper $ Type typ
+        Coercion coercion -> wrapper $ Coercion coercion
 
 indexed :: [a] -> [(Int, a)]
 indexed = zip (iterate (+1) 0)
