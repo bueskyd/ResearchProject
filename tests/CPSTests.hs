@@ -137,12 +137,12 @@ is_even n = case n of
 --{-# ANN pong "AUTO_CPS" #-}
 ping :: Int -> Int
 ping n = case n of 
-    0 -> 1
-    n -> pong (n-1)
+    0 -> 0
+    n -> pong (n-1) + 1
 pong :: Int -> Int
 pong n = case n of 
-    0 -> -1
-    n -> ping (n-1)
+    0 -> 0
+    n -> ping (n-1) - 1
 
 --{-# ANN factorial "AUTO_CPS" #-}
 factorial :: Int -> Int
@@ -194,12 +194,12 @@ is_even_cps n = aux id n where
 
 ping_cps :: (Int -> Int) -> Int -> Int
 ping_cps c n = case n of 
-    0 -> c 1
-    n -> pong_cps id (n-1)
+    0 -> c 0
+    n -> pong_cps (\i -> c(i + 1)) (n-1)
 pong_cps :: (Int -> Int) -> Int -> Int
 pong_cps c n = case n of 
-    0 -> c (-1)
-    n -> ping_cps id (n-1)
+    0 -> c 0
+    n -> ping_cps (\i -> c(i - 1)) (n-1)
 
 factorial_cps :: Int -> Int
 factorial_cps n = aux id n where
