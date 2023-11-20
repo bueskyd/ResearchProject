@@ -72,11 +72,12 @@ transformTopLevelToCPS dflags bind callableFunctions = case bind of
         let callableFunctions' = map fst lst ++ callableFunctions
         funcToAux <- mapFunctionsToAux dflags callableFunctions'
         transformedFunctions <- mapM (\function -> do
-            (transformed, aux) <- aux callableFunctions' funcToAux function
+            (transformed, aux) <- aux funcToAux function
             return [transformed, aux]) lst
         return $ Rec $ join transformedFunctions
     where
-        aux callableFunctions funcToAux (coreBndr, expr) = do
+        aux funcToAux (coreBndr, expr) = do
+            let callableFunctions = fst <$> Map.toList funcToAux
             let auxCoreBndr = fromJust $ Map.lookup coreBndr funcToAux
             wrapperBody <- makeWrapperFunctionBody expr auxCoreBndr
             (_, transformedFunction) <- transformFunctionToCPS dflags (coreBndr, expr) callableFunctions
