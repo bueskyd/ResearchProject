@@ -167,7 +167,7 @@ appPlusToLetBinding n = case n of
         a = appPlusToLetBinding (n - 1)
         in a * a
 
---{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
+{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
 fourthLetBindingTest :: Int -> Int
 fourthLetBindingTest n = case n of
     0 -> 0
@@ -287,12 +287,6 @@ bar 0 = 0
 bar n = n + bar (n - 1)
 
 --{-# ANN fib "AUTO_CPS" #-}
-fib :: Int -> Int
-fib 0 = 0
-fib 1 = 1
-fib n = fib (n - 1) + fib (n - 2)
-
-
 fib :: Int -> Int
 fib 0 = 0
 fib 1 = 1

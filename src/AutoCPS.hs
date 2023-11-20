@@ -272,11 +272,6 @@ transformBodyToCPS dflags expr callableFunctions continuation = aux expr callabl
 isFunction :: CoreBndr -> Bool
 isFunction = isJust . splitPiTy_maybe . varType
 
-
-case .. of
-    1 + 
-    1 + 
-
 simplify :: DynFlags -> CoreExpr -> CoreExpr
 simplify dflags expr = aux expr id where
     aux :: CoreExpr -> (CoreExpr -> CoreExpr) -> CoreExpr
@@ -294,15 +289,19 @@ simplify dflags expr = aux expr id where
                 in aux expr1 (\x -> Let (NonRec bndr expr0') x)
             else case expr0 of
                 Let (Rec lst) innerExpr -> let
+                    innerExpr' = aux innerExpr id
                     expr1' = aux expr1 wrapper
-                    in Let (Rec lst) (Let (NonRec bndr innerExpr) expr1')
+                    in Let (Rec lst) (Let (NonRec bndr innerExpr') expr1')
                 Let (NonRec innerBndr innerExpr0) innerExpr1 -> let
+                    innerExpr0' = aux innerExpr0 id
+                    innerExpr1' = aux innerExpr1 id
                     expr1' = aux expr1 wrapper
-                    in Let (NonRec innerBndr innerExpr0) (Let (NonRec bndr innerExpr1) expr1')
+                    in Let (NonRec innerBndr innerExpr0') (Let (NonRec bndr innerExpr1') expr1')
                 _ -> let
+                    expr0' = aux expr0 id
                     expr1' = wrapper expr1
                     expr1'' = aux expr1' id
-                    in Let (NonRec bndr expr0) expr1''
+                    in Let (NonRec bndr expr0') expr1''
         Let (Rec lst) expr -> let
             lst' = map (\(coreBndr, expr) -> let
                 expr' = aux expr id
