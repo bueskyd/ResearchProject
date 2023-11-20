@@ -3,7 +3,7 @@ module AutoCPS (plugin) where
 import Control.Monad (forM_, join, mapAndUnzipM, unless, void, when)
 import Data.Data
 import qualified Data.Foldable
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, fromJust)
 import Data.Typeable
 import Debug.Trace
 import GHC.Builtin.Types (manyDataConTy)
@@ -31,7 +31,7 @@ plugin =
         }
 
 install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
-install _ todo = return (CoreDoPluginPass "Hi mom" pass : todo)
+install _ todo = return (CoreDoPluginPass "AutoCPS" pass : todo)
 
 pass :: ModGuts -> CoreM ModGuts
 pass guts = do
@@ -50,8 +50,8 @@ pass guts = do
                             (\anns -> "AUTO_CPS" `elem` anns || a) <$> (annotationsOn guts b :: CoreM [String]))
                     (return False)
                     lst0
-            if do_transform then do 
-                cps <- transformToCPS dflags bind []
+            if do_transform then do
+                cps <- transformTopLevelToCPS dflags bind []
                 putMsgS "Original"
                 putMsgS $ showSDoc dflags (ppr bind)
                 putMsgS "Transformed to CPS"
@@ -59,30 +59,31 @@ pass guts = do
                 return cps
             else return bind
 
-transformToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
-transformToCPS dflags bind callableFunctions = case bind of
+transformTopLevelToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
+transformTopLevelToCPS dflags bind callableFunctions = case bind of
     NonRec coreBndr expr -> do
         let callableFunctions' = coreBndr : callableFunctions
-        funcToAux <- mapFunctionsToAux dflags callableFunctions'
-        (transformed, aux) <- transformToCPS' funcToAux (coreBndr, expr)
-        return $ Rec [transformed, aux]
+        (_, transformedFunction) <- transformFunctionToCPS dflags (coreBndr, expr) callableFunctions
+        (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions
+        let funcToAux = Map.fromList bndrMap
+        let recursivecallCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux
+        return $ NonRec coreBndr transformedLocals
     Rec lst -> do
         let callableFunctions' = map fst lst ++ callableFunctions
-        funcToAux <- mapFunctionsToAux dflags callableFunctions'
         transformedFunctions <- mapM (\function -> do
-            (transformed, aux) <- transformToCPS' funcToAux function
+            (transformed, aux) <- aux callableFunctions' function
             return [transformed, aux]) lst
         return $ Rec $ join transformedFunctions
     where
-        transformToCPS' funcToAux (coreBndr, expr) = do
-            case Map.lookup coreBndr funcToAux of
-                Just auxCoreBndr -> do
-                    wrapperBody <- makeWrapperFunctionBody expr auxCoreBndr
-                    auxBody <- transformBodyToCPS dflags (coreBndr, expr) funcToAux
-                    --auxTailRecursive <- wrapCPS dflags (coreBndr, expr) (auxCoreBndr, auxBody)
-                    return ((coreBndr, wrapperBody), (auxCoreBndr, auxBody))
-                Nothing ->
-                    return ((coreBndr, expr), (coreBndr, expr)) --This should not happen
+        aux callableFunctions (coreBndr, expr) = do
+            funcToAux <- mapFunctionsToAux dflags callableFunctions
+            let auxCoreBndr = fromJust $ Map.lookup coreBndr funcToAux
+            wrapperBody <- makeWrapperFunctionBody expr auxCoreBndr
+            (_, transformedFunction) <- transformFunctionToCPS dflags (coreBndr, expr) callableFunctions
+            (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions
+            let funcToAux' = Map.union funcToAux (Map.fromList bndrMap)
+            let recursiveCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux'
+            return ((coreBndr, wrapperBody), (auxCoreBndr, recursiveCallsReplaced))
 
 mapFunctionsToAux :: DynFlags -> [CoreBndr] -> CoreM (Map.Map CoreBndr CoreBndr)
 mapFunctionsToAux dflags functions =
@@ -90,121 +91,168 @@ mapFunctionsToAux dflags functions =
         auxFunction <- makeAuxCPSFun dflags func
         return (func, auxFunction)) functions
 
-transformBodyToCPS :: DynFlags -> (CoreBndr, CoreExpr) -> Map.Map CoreBndr CoreBndr -> CoreM CoreExpr
-transformBodyToCPS dflags (coreBndr, expr) funcToAux = do
-    let coreBndrName = getCoreBndrName dflags coreBndr
+transformFunctionToCPS :: DynFlags -> (CoreBndr, CoreExpr) -> [CoreBndr] -> CoreM (CoreBndr, CoreExpr)
+transformFunctionToCPS dflags (coreBndr, expr) callableFunctions = do
     continuationType <- makeContinuationType coreBndr
     continuation <- makeVar "cont" continuationType
     putMsgS $ "Transforming body of " ++ showSDoc dflags (ppr coreBndr)
     case prependArg expr continuation of
-        Nothing -> return expr -- expr is not a lambda
+        Nothing -> return (coreBndr, expr) -- expr is not a lambda
         Just expr' -> do
+            newType <- makeCPSFunTy coreBndr
+            let transformedCoreBndr = setVarType coreBndr newType
             let simplifiedExpr = simplify dflags expr'
-            let callableFunctions = map fst $ Map.toList funcToAux
-            semiTransformedBody <- transformBodyToCPS' simplifiedExpr callableFunctions continuation
-            let transformedBody = replaceRecursiveCalls dflags semiTransformedBody funcToAux
-            return transformedBody
-    where
-        transformBodyToCPS' expr callableFunctions continuation = aux expr callableFunctions True
-            where
-                aux :: CoreExpr -> [CoreBndr] -> Bool -> CoreM CoreExpr
-                aux expr callableFunctions inTailPosition = case expr of
-                    (Var id) ->
-                        if inTailPosition then
-                            return $ App (Var continuation) (Var id)
-                        else
-                            return $ Var id
-                    (Lit lit) -> return $ Lit lit
-                    (App expr0 expr1) -> do
-                        (exprWithBindings, newBindings) <-
-                            replaceNonTailCalls dflags (App expr0 expr1) callableFunctions
-                        let hasReplacedCalls = not (null newBindings)
-                        let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
-                        let isRecursiveCall = isCallToAny dflags (App expr0 expr1) callableFunctionNames
-                        if hasReplacedCalls then do
-                            let combiningCall = App (Var continuation) exprWithBindings
-                            let tailRecExpr = Data.Foldable.foldl'
-                                    (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
-                                    combiningCall
-                                    newBindings
-                            return tailRecExpr
-                        else if inTailPosition then
-                            if isRecursiveCall then
-                                return $ App (App expr0 expr1) (Var continuation)
-                            else
-                                return $ App (Var continuation) exprWithBindings
-                        else
-                            return $ App expr0 expr1
-                    (Lam lamCoreBndr expr) -> do
-                        expr' <- aux expr callableFunctions True
-                        return $ Lam lamCoreBndr expr'
-                    (Let (NonRec bndr expr0) expr1) ->
-                        if isFunction bndr then do
-                            transformedBind <- transformToCPS dflags (NonRec bndr expr0) callableFunctions
-                            expr1' <- aux expr1 (bndr : callableFunctions) inTailPosition
-                            return $ Let transformedBind expr1'
-                        else do
-                            (exprWithBindings, newBindings) <-
-                                replaceNonTailCalls dflags expr0 callableFunctions
-                            let hasReplacedCalls = not (null newBindings)
-                            let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
-                            let isRecursiveCall = isCallToAny dflags expr0 callableFunctionNames
-                            expr1' <- aux expr1 callableFunctions inTailPosition
-                            if hasReplacedCalls then do
-                                let newLetBinding = Let (NonRec bndr exprWithBindings) expr1'
-                                let tailRecExpr = Data.Foldable.foldl'
-                                        (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
-                                        newLetBinding
-                                        newBindings
-                                return tailRecExpr
-                            else if isRecursiveCall then do
-                                varUnique <- getUniqueM
-                                let varName = mkSystemVarName varUnique (mkFastString "contBndr")
-                                let varTyp = varType bndr
-                                let newBindingName = mkLocalVar VanillaId varName Many varTyp vanillaIdInfo
-                                let newLetBinding = Let (NonRec bndr (Var newBindingName)) expr1'
-                                let continuationLam = Lam newBindingName newLetBinding
-                                return $ App expr0 continuationLam
-                            else
-                                return $ Let (NonRec bndr expr0) expr1'
-                    (Let (Rec lst) expr) -> do
-                        transformedBind <- transformToCPS dflags (Rec lst) callableFunctions
-                        expr' <- aux expr callableFunctions inTailPosition
-                        return $ Let transformedBind expr'
-                    (Case expr caseCoreBndr typ alternatives) -> do
-                        altAsCPS <- mapM
-                            (\(Alt altCon coreBndrs rhs) -> do
-                                rhs' <- aux rhs callableFunctions inTailPosition
-                                return $ Alt altCon coreBndrs rhs')
-                            alternatives
-                        (exprWithBindings, newBindings) <- replaceNonTailCalls dflags expr callableFunctions --Do this using wrapper instead
-                        let hasReplacedCalls = not (null newBindings)
-                        let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
-                        let isRecursiveCall = isCallToAny dflags expr callableFunctionNames
-                        if hasReplacedCalls then let
-                            exprInCase = Case exprWithBindings caseCoreBndr typ altAsCPS
-                            tailRecExpr = Data.Foldable.foldl'
+            transformedBody <- transformBodyToCPS dflags simplifiedExpr callableFunctions continuation
+            return (transformedCoreBndr, transformedBody)
+
+transformLocalFunctionsToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreM (CoreExpr, [(CoreBndr, CoreBndr)])
+transformLocalFunctionsToCPS dflags expr callableFunctions = case expr of
+    Var id -> return (Var id, [])
+    Lit lit -> return (Lit lit, [])
+    App expr0 expr1 -> do
+        (expr0', bndrMap0) <- transformLocalFunctionsToCPS dflags expr0 callableFunctions
+        (expr1', bndrMap1) <- transformLocalFunctionsToCPS dflags expr1 callableFunctions
+        return (App expr0' expr1', bndrMap0 ++ bndrMap1)
+    Lam lamCoreBndr lamExpr -> do
+        (lamExpr', bndrMap) <- transformLocalFunctionsToCPS dflags lamExpr callableFunctions
+        return (Lam lamCoreBndr lamExpr', bndrMap)
+    Let (NonRec localCoreBndr expr0) expr1 ->
+        if isFunction localCoreBndr then do
+            let callableFunctions' = localCoreBndr : callableFunctions
+            (localCoreBndr', expr0') <- transformFunctionToCPS dflags (localCoreBndr, expr0) callableFunctions'
+            (expr0'', bndrMap0) <- transformLocalFunctionsToCPS dflags expr0' callableFunctions'
+            (expr1', bndrMap1) <- transformLocalFunctionsToCPS dflags expr1 callableFunctions'
+            return (Let (NonRec localCoreBndr' expr0'') expr1', (localCoreBndr, localCoreBndr') : bndrMap0 ++ bndrMap1)
+        else do
+            (expr0', bndrMap0) <- transformLocalFunctionsToCPS dflags expr0 callableFunctions
+            (expr1', bndrMap1) <- transformLocalFunctionsToCPS dflags expr1 callableFunctions
+            return (Let (NonRec localCoreBndr expr0') expr1', bndrMap0 ++ bndrMap1)
+    Let (Rec lst) expr -> do
+        let callableFunctions' = callableFunctions ++ filter isFunction (map fst lst)
+        (lst', lstBndrMap) <- mapAndUnzipM (\(localCoreBndr, localExpr) ->
+            if isFunction localCoreBndr then do
+                (localExpr', bndrMap) <- transformLocalFunctionsToCPS dflags localExpr callableFunctions'
+                (localCoreBndr', localExpr') <- transformFunctionToCPS dflags (localCoreBndr, localExpr') callableFunctions'
+                return ((localCoreBndr', localExpr'), (localCoreBndr, localCoreBndr') : bndrMap)
+            else do
+                (localExpr', bndrMap) <- transformLocalFunctionsToCPS dflags localExpr callableFunctions'
+                return ((localCoreBndr, localExpr'), bndrMap)) lst
+        (expr', bndrMap) <- transformLocalFunctionsToCPS dflags expr callableFunctions'
+        return (Let (Rec lst') expr', join lstBndrMap ++ bndrMap)
+    Case expr caseCoreBndr typ alternatives -> do
+        (alternatives', altBndrMap) <- mapAndUnzipM (\(Alt altCon coreBndrs rhs) -> do
+            (rhs', bndrMap) <- transformLocalFunctionsToCPS dflags rhs callableFunctions
+            return (Alt altCon coreBndrs rhs', bndrMap)) alternatives
+        (expr', bndrMap) <- transformLocalFunctionsToCPS dflags expr callableFunctions
+        return (Case expr' caseCoreBndr typ alternatives', join altBndrMap ++ bndrMap)
+    Cast expr coercion -> do
+        (expr', bndrMap) <- transformLocalFunctionsToCPS dflags expr callableFunctions
+        return (Cast expr' coercion, bndrMap)
+    Tick tickish expr -> do
+        (expr', bndrMap) <- transformLocalFunctionsToCPS dflags expr callableFunctions
+        return (Tick tickish expr', bndrMap)
+    Type typ -> return (Type typ, [])
+    Coercion coercion -> return (Coercion coercion, [])
+
+transformBodyToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreBndr -> CoreM CoreExpr
+transformBodyToCPS dflags expr callableFunctions continuation = aux expr callableFunctions True where
+    aux :: CoreExpr -> [CoreBndr] -> Bool -> CoreM CoreExpr
+    aux expr callableFunctions inTailPosition = case expr of
+        Var id ->
+            if inTailPosition then
+                return $ App (Var continuation) (Var id)
+            else
+                return $ Var id
+        Lit lit -> return $ Lit lit
+        App expr0 expr1 -> do
+            (exprWithBindings, newBindings) <-
+                replaceNonTailCalls dflags (App expr0 expr1) callableFunctions inTailPosition
+            let hasReplacedCalls = not (null newBindings)
+            let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
+            let isRecursiveCall = isCallToAny dflags (App expr0 expr1) callableFunctionNames
+            let transformedApp
+                    | hasReplacedCalls = let
+                        combiningCall = App (Var continuation) exprWithBindings
+                        tailRecExpr = Data.Foldable.foldl'
                                 (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
-                                exprInCase
+                                combiningCall
                                 newBindings
-                            in return tailRecExpr
-                        else if isRecursiveCall then do
-                            varUnique <- getUniqueM
-                            let varName = mkSystemVarName varUnique (mkFastString "contBndr")
-                            let newBindingName = mkLocalVar VanillaId varName Many typ vanillaIdInfo
-                            let continuationLam = Lam newBindingName (Case (Var newBindingName) caseCoreBndr typ altAsCPS)
-                            let expr' = App expr continuationLam
-                            return expr'
-                        else
-                            return $ Case expr caseCoreBndr typ altAsCPS
-                    (Cast expr coercion) -> do
-                        expr' <- aux expr callableFunctions False
-                        return $ Cast expr' coercion
-                    (Tick tickish expr) -> do
-                        expr' <- aux expr callableFunctions False
-                        return $ Tick tickish expr'
-                    (Type typ) -> return $ Type typ
-                    (Coercion coercion) -> return $ Coercion coercion
+                        in tailRecExpr
+                    | inTailPosition = if isRecursiveCall then
+                                App (App expr0 expr1) (Var continuation)
+                            else
+                                App (Var continuation) exprWithBindings
+                    | otherwise = App expr0 expr1
+            return transformedApp
+        Lam lamCoreBndr lamExpr -> do
+            lamExpr' <- aux lamExpr callableFunctions True
+            return $ Lam lamCoreBndr lamExpr'
+        Let (NonRec bndr expr0) expr1 ->
+            if isFunction bndr then do
+                expr1' <- aux expr1 (bndr : callableFunctions) inTailPosition
+                return $ Let (NonRec bndr expr0) expr1'
+            else do
+                (exprWithBindings, newBindings) <-
+                    replaceNonTailCalls dflags expr0 callableFunctions False
+                let hasReplacedCalls = not (null newBindings)
+                let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
+                let isRecursiveCall = isCallToAny dflags expr0 callableFunctionNames
+                expr1' <- aux expr1 callableFunctions inTailPosition
+                if hasReplacedCalls then do
+                    let newLetBinding = Let (NonRec bndr exprWithBindings) expr1'
+                    let tailRecExpr = Data.Foldable.foldl'
+                            (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
+                            newLetBinding
+                            newBindings
+                    return tailRecExpr
+                else if isRecursiveCall then do
+                    varUnique <- getUniqueM
+                    let varName = mkSystemVarName varUnique (mkFastString "contBndr")
+                    let varTyp = varType bndr
+                    let newBindingName = mkLocalVar VanillaId varName Many varTyp vanillaIdInfo
+                    let newLetBinding = Let (NonRec bndr (Var newBindingName)) expr1'
+                    let continuationLam = Lam newBindingName newLetBinding
+                    return $ App expr0 continuationLam
+                else
+                    return $ Let (NonRec bndr expr0) expr1'
+        Let (Rec lst) expr -> do
+            let callableFunctions' = callableFunctions ++ filter isFunction (map fst lst)
+            expr' <- aux expr callableFunctions' inTailPosition
+            return $ Let (Rec lst) expr'
+        Case expr caseCoreBndr typ alternatives -> do
+            altAsCPS <- mapM
+                (\(Alt altCon coreBndrs rhs) -> do
+                    rhs' <- aux rhs callableFunctions inTailPosition
+                    return $ Alt altCon coreBndrs rhs')
+                alternatives
+            (exprWithBindings, newBindings) <- replaceNonTailCalls dflags expr callableFunctions False
+            let hasReplacedCalls = not (null newBindings)
+            let callableFunctionNames = map (showSDoc dflags . ppr) callableFunctions
+            let isRecursiveCall = isCallToAny dflags expr callableFunctionNames
+            if hasReplacedCalls then let
+                exprInCase = Case exprWithBindings caseCoreBndr typ altAsCPS
+                tailRecExpr = Data.Foldable.foldl'
+                    (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
+                    exprInCase
+                    newBindings
+                in return tailRecExpr
+            else if isRecursiveCall then do
+                varUnique <- getUniqueM
+                let varName = mkSystemVarName varUnique (mkFastString "contBndr")
+                let newBindingName = mkLocalVar VanillaId varName Many typ vanillaIdInfo
+                let continuationLam = Lam newBindingName (Case (Var newBindingName) caseCoreBndr typ altAsCPS)
+                let expr' = App expr continuationLam
+                return expr'
+            else
+                return $ Case expr caseCoreBndr typ altAsCPS
+        Cast expr coercion -> do
+            expr' <- aux expr callableFunctions False
+            return $ Cast expr' coercion
+        Tick tickish expr -> do
+            expr' <- aux expr callableFunctions False
+            return $ Tick tickish expr'
+        Type typ -> return $ Type typ
+        Coercion coercion -> return $ Coercion coercion
 
 isFunction :: CoreBndr -> Bool
 isFunction = isJust . splitPiTy_maybe . varType
@@ -213,39 +261,56 @@ simplify :: DynFlags -> CoreExpr -> CoreExpr
 simplify dflags expr = aux expr id where
     aux :: CoreExpr -> (CoreExpr -> CoreExpr) -> CoreExpr
     aux expr wrapper = case expr of
-        (Var id) -> wrapper $ Var id
-        (Lit lit) -> wrapper $ Lit lit
-        (App expr0 expr1) ->
+        Var id -> wrapper $ Var id
+        Lit lit -> wrapper $ Lit lit
+        App expr0 expr1 ->
             aux expr0 (\x -> aux expr1 (\y -> wrapper $ App x y))
-        (Lam lamCoreBndr expr) -> let
+        Lam lamCoreBndr expr -> let
             expr' = aux expr id
             in wrapper $ Lam lamCoreBndr expr'
-        (Let (NonRec bndr expr0) expr1) -> let
-            expr0' = aux expr0 id
-            expr1' = aux expr1 wrapper
-            in Let (NonRec bndr expr0') expr1'
-        (Let (Rec lst) expr) -> let
+        Let (NonRec bndr expr0) expr1 ->
+            if isFunction bndr then let
+                expr0' = aux expr0 id
+                in aux expr1 (\x -> Let (NonRec bndr expr0') x)
+            else case expr0 of
+                Let (Rec lst) innerExpr -> let
+                    expr1' = aux expr1 wrapper
+                    in Let (Rec lst) (Let (NonRec bndr innerExpr) expr1')
+                Let (NonRec innerBndr innerExpr0) innerExpr1 -> let
+                    expr1' = aux expr1 wrapper
+                    in Let (NonRec innerBndr innerExpr0) (Let (NonRec bndr innerExpr1) expr1')
+                _ -> let
+                    expr1' = wrapper expr1
+                    expr1'' = aux expr1' id
+                    in Let (NonRec bndr expr0) expr1''
+        Let (Rec lst) expr -> let
             lst' = map (\(coreBndr, expr) -> let
                 expr' = aux expr id
                 in (coreBndr, expr')) lst
-            expr' = aux expr wrapper
-            in Let (Rec lst') expr'
-        (Case expr caseCoreBndr typ alternatives) -> let
+            in case expr of
+                Let {} -> let
+                    expr' = aux expr wrapper
+                    in Let (Rec lst') expr'
+                _ -> let
+                    expr' = wrapper expr
+                    expr'' = aux expr' id
+                    in Let (Rec lst') expr''
+        Case expr caseCoreBndr typ alternatives -> let
             altAsCPS = map
                 (\(Alt altCon coreBndrs rhs) -> case rhs of
                     Case {} -> let
                         rhs' = aux rhs wrapper
-                        in  Alt altCon coreBndrs rhs'
+                        in Alt altCon coreBndrs rhs'
                     _ -> let
                         rhs' = wrapper rhs
                         rhs'' = aux rhs' id
                         in Alt altCon coreBndrs rhs'')
                 alternatives
             in aux expr (\x -> Case x caseCoreBndr typ altAsCPS)
-        (Cast expr coercion) -> aux expr (\x -> wrapper $ Cast x coercion)
-        (Tick tickish expr) -> aux expr (wrapper . Tick tickish)
-        (Type typ) -> wrapper $ Type typ
-        (Coercion coercion) -> wrapper $ Coercion coercion
+        Cast expr coercion -> aux expr (\x -> wrapper $ Cast x coercion)
+        Tick tickish expr -> aux expr (wrapper . Tick tickish)
+        Type typ -> wrapper $ Type typ
+        Coercion coercion -> wrapper $ Coercion coercion
 
 indexed :: [a] -> [(Int, a)]
 indexed = zip (iterate (+1) 0)
@@ -261,29 +326,29 @@ setAt index element lst = aux index lst where
 replaceRecursiveCalls :: DynFlags -> CoreExpr -> Map.Map CoreBndr CoreBndr -> CoreExpr
 replaceRecursiveCalls dflags expr funcToAux = aux expr where
     aux expr = case expr of
-        (Var id) -> case Map.lookup id funcToAux of
+        Var id -> case Map.lookup id funcToAux of
             Just aux -> Var aux
             Nothing -> Var id
-        (Lit lit) -> Lit lit
-        (App expr0 expr1) ->
+        Lit lit -> Lit lit
+        App expr0 expr1 ->
             let expr0' = aux expr0
                 expr1' = aux expr1
             in App expr0' expr1'
-        (Lam lamCoreBndr expr) ->
+        Lam lamCoreBndr expr ->
             let expr' = aux expr
             in Lam lamCoreBndr expr'
-        (Let (NonRec bndr expr0) expr1) ->
+        Let (NonRec bndr expr0) expr1 ->
             let expr0' = aux expr0
                 expr1' = aux expr1
             in Let (NonRec bndr expr0') expr1'
-        (Let (Rec lst) expr) -> let
+        Let (Rec lst) expr -> let
             lst' = map
                 (\(localCoreBndr, expr) -> let
                     expr' = aux expr
                     in (localCoreBndr, expr')) lst
             expr' = aux expr
             in Let (Rec lst') expr'
-        (Case expr caseCoreBndr typ alternatives) -> let
+        Case expr caseCoreBndr typ alternatives -> let
             altAsCPS = map
                     (\(Alt altCon coreBndrs rhs) ->
                         let rhs' = aux rhs
@@ -291,25 +356,25 @@ replaceRecursiveCalls dflags expr funcToAux = aux expr where
                     alternatives
             expr' = aux expr
             in Case expr' caseCoreBndr typ altAsCPS
-        (Cast expr coercion) -> let
+        Cast expr coercion -> let
             expr' = aux expr
             in Cast expr' coercion
-        (Tick tickish expr) -> let
+        Tick tickish expr -> let
             expr' = aux expr
             in Tick tickish expr'
-        (Type typ) -> Type typ
-        (Coercion coercion) -> Coercion coercion
+        Type typ -> Type typ
+        Coercion coercion -> Coercion coercion
 
-replaceNonTailCalls :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreM (CoreExpr, [(CoreBndr, CoreExpr)])
-replaceNonTailCalls dflags expr coreBndrs = aux expr where
-    aux :: CoreExpr -> CoreM (CoreExpr, [(CoreBndr, CoreExpr)])
-    aux expr = case expr of
-        (Var id) -> return (Var id, [])
-        (Lit lit) -> return (Lit lit, [])
-        (App expr0 expr1) -> do
-            (expr0', newBindings0) <- aux expr0
-            (expr1', newBindings1) <- aux expr1
-            let maybeCall = isCallToAnyMaybe dflags expr1' coreBndrs
+replaceNonTailCalls :: DynFlags -> CoreExpr -> [CoreBndr] -> Bool -> CoreM (CoreExpr, [(CoreBndr, CoreExpr)])
+replaceNonTailCalls dflags expr callableFunctions inTailPosition = aux expr callableFunctions inTailPosition where
+    aux :: CoreExpr -> [CoreBndr] -> Bool -> CoreM (CoreExpr, [(CoreBndr, CoreExpr)])
+    aux expr callableFunctions inTailPosition = case expr of
+        Var id -> return (Var id, [])
+        Lit lit -> return (Lit lit, [])
+        App expr0 expr1 -> do
+            (expr0', newBindings0) <- aux expr0 callableFunctions inTailPosition
+            (expr1', newBindings1) <- aux expr1 callableFunctions False
+            let maybeCall = isCallToAnyMaybe dflags expr1' callableFunctions
             case maybeCall of
                 Just calledCoreBndr -> do
                     let returnType = getReturnType calledCoreBndr
@@ -323,38 +388,53 @@ replaceNonTailCalls dflags expr coreBndrs = aux expr where
                     return (App expr0' (Var newBindingName), (newBindingName, expr1') : newBindings0 ++ newBindings1)
                 Nothing ->
                     return (App expr0' expr1', newBindings0 ++ newBindings1)
-        (Lam lamCoreBndr expr) -> do
-            (expr', newBindings) <- aux expr
+        Lam lamCoreBndr expr -> do
+            (expr', newBindings) <- aux expr callableFunctions True
             return (Lam lamCoreBndr expr', newBindings)
-        (Let (NonRec bndr expr0) expr1) -> do
-            (expr0', newBindings0) <- aux expr0
-            (expr1', newBindings1) <- aux expr1
-            return (Let (NonRec bndr expr0') expr1', newBindings0 ++ newBindings1)
-        (Let (Rec lst) expr) -> do
+        Let (NonRec bndr expr0) expr1 -> do
+            let expr0InTailPosition = isFunction bndr
+            (expr0', newBindings0) <- aux expr0 callableFunctions expr0InTailPosition
+            (expr1', newBindings1) <- aux expr1 callableFunctions inTailPosition
+            let maybeCall = isCallToAnyMaybe dflags expr1' callableFunctions
+            case maybeCall of
+                Just calledCoreBndr -> do
+                    let returnType = getReturnType calledCoreBndr
+                    let kind = typeKind returnType
+                    tyVarUnique <- getUniqueM
+                    let typeVariable = mkTyVar (mkSystemVarName tyVarUnique (mkFastString "ty")) kind
+                    let tyVarTy = mkTyVarTy typeVariable
+                    varUnique <- getUniqueM
+                    let varName = mkSystemVarName varUnique (mkFastString "contBndr")
+                    let newBindingName = mkLocalVar VanillaId varName Many tyVarTy vanillaIdInfo
+                    return (Let (NonRec bndr expr0') (Var newBindingName), (newBindingName, expr1') : newBindings0 ++ newBindings1)
+                Nothing ->
+                    return (Let (NonRec bndr expr0') expr1', newBindings0 ++ newBindings1)
+        Let (Rec lst) expr -> do
             (lst', newBindings0) <- mapAndUnzipM
                 (\(localCoreBndr, expr) -> do
-                    (expr', bindings) <- aux expr
+                    let localExprInTailPosition = isFunction localCoreBndr
+                    (expr', bindings) <- aux expr callableFunctions localExprInTailPosition
                     return ((localCoreBndr, expr'), bindings))
                 lst
-            (expr', newBindings1) <- aux expr
+            (expr', newBindings1) <- aux expr callableFunctions inTailPosition
             return (Let (Rec lst') expr', join newBindings0 ++ newBindings1)
-        (Case expr caseCoreBndr typ alternatives) -> do
+        Case expr caseCoreBndr typ alternatives -> do
             {-(altAsCPS, newBindings0) <- mapAndUnzipM
                 (\(Alt altCon coreBndrs rhs) -> do
                     (rhs', bindings) <- aux rhs
                     return (Alt altCon coreBndrs rhs', bindings))
                 alternatives-}
-            (expr', newBindings1) <- aux expr
+            (expr', newBindings1) <- aux expr callableFunctions False
             let altAsCPS = alternatives
             return (Case expr' caseCoreBndr typ altAsCPS, {-join newBindings0 ++ -}newBindings1)
-        (Cast expr coercion) -> do
-            (expr', newBindings) <- aux expr
+        Cast expr coercion -> do
+            (expr', newBindings) <- aux expr callableFunctions False
             return (Cast expr' coercion, newBindings)
-        (Tick tickish expr) -> do
-            (expr', newBindings) <- aux expr
+        Tick tickish expr -> do
+            (expr', newBindings) <- aux expr callableFunctions False
             return (Tick tickish expr', newBindings)
-        (Type typ) -> return (Type typ, [])
-        (Coercion coercion) -> return (Coercion coercion, [])
+        Type typ -> return (Type typ, [])
+        Coercion coercion -> return (Coercion coercion, [])
 
 makeWrapperFunctionBody :: CoreExpr -> CoreBndr -> CoreM CoreExpr
 makeWrapperFunctionBody originalCoreExpr auxCoreBndr = do
@@ -425,8 +505,8 @@ getReturnType coreBndr = let
 prependArg :: CoreExpr -> Var -> Maybe CoreExpr
 prependArg expr var = aux expr where
     aux expr = case expr of
-        (Lam coreBndr nextParam@(Lam _ _)) -> aux nextParam >>= (Just . Lam coreBndr)
-        (Lam coreBndr expr) -> Just $ Lam coreBndr (Lam var expr)
+        Lam coreBndr nextParam@(Lam _ _) -> aux nextParam >>= (Just . Lam coreBndr)
+        Lam coreBndr expr -> Just $ Lam coreBndr (Lam var expr)
         _ -> Nothing
 
 makeVar :: String -> Type -> CoreM Var
@@ -473,24 +553,24 @@ getLocalBndrNames dflags (coreBndr, expr) = getCoreBndrName dflags coreBndr : ge
 
 isTailRecursive :: DynFlags -> CoreBind -> Bool
 isTailRecursive dflags expr = case expr of
-    (NonRec coreBndr expr) -> isTailRecursive' [getCoreBndrName dflags coreBndr] expr
-    (Rec lst) ->
+    NonRec coreBndr expr -> isTailRecursive' [getCoreBndrName dflags coreBndr] expr
+    Rec lst ->
         let coreBndrNames = getCoreBndrNames dflags (Rec lst)
         in all (\(coreBndr, expr) -> isTailRecursive' coreBndrNames expr) lst
     where
         isTailRecursive' coreBndrNames expr = case expr of
-            (Var id) -> True
-            (Lit lit) -> True
-            (App expr0 expr1) ->
+            Var id -> True
+            Lit lit -> True
+            App expr0 expr1 ->
                 isTailRecursive' coreBndrNames expr0
                 && not (containsCallToAny dflags expr1 coreBndrNames)
                 && isTailRecursive' coreBndrNames expr1 -- Test correctness
-            (Lam coreBndr expr) -> isTailRecursive' coreBndrNames expr
-            (Let (NonRec bndr expr0) expr1) ->
+            Lam coreBndr expr -> isTailRecursive' coreBndrNames expr
+            Let (NonRec bndr expr0) expr1 ->
                 let localBndrName = getCoreBndrName dflags bndr
                     localIsTR = isTailRecursive' (localBndrName : coreBndrNames) expr0
                 in localIsTR && isTailRecursive' coreBndrNames expr1
-            (Let (Rec lst) expr) -> let
+            Let (Rec lst) expr -> let
                 localBndrNames = getCoreBndrNames dflags (Rec lst)
                 referenceableBndrNames = coreBndrNames ++ localBndrNames
                 localsAreTR =all
@@ -498,13 +578,13 @@ isTailRecursive dflags expr = case expr of
                         isTailRecursive' referenceableBndrNames localBndrExpr)
                     lst
                 in localsAreTR && isTailRecursive' referenceableBndrNames expr
-            (Case expr coreBndr _ alternatives) ->
+            Case expr coreBndr _ alternatives ->
                 isTailRecursive' coreBndrNames expr
                 && all (\(Alt altCon coreBndrs rhs) -> isTailRecursive' coreBndrNames rhs) alternatives
-            (Cast expr _) -> isTailRecursive' coreBndrNames expr
-            (Tick _ expr) -> isTailRecursive' coreBndrNames expr
-            (Type typ) -> True
-            (Coercion coercion) -> True
+            Cast expr _ -> isTailRecursive' coreBndrNames expr
+            Tick _ expr -> isTailRecursive' coreBndrNames expr
+            Type typ -> True
+            Coercion coercion -> True
 
 containsCallToAny :: DynFlags -> Expr CoreBndr -> [String] -> Bool
 containsCallToAny dflags expr = any (containsCallTo dflags expr)
@@ -650,9 +730,8 @@ unique (x : xs) = do
 elementIn :: Id -> [Id] -> CoreM Bool
 elementIn a =
     Data.Foldable.foldl'
-        ( \accIo e -> do
+        (\accIo e -> do
             acc <- accIo
             let same = getName a == getName e
-            return $ same || acc
-        )
+            return $ same || acc)
         (return False)

@@ -16,6 +16,9 @@ main = do_test
     --mapM_ (\n -> print $ mutuallyRecursive0 n == mutuallyRecursive0C n) $ take 10 $ iterate (+1) 0
     --mapM_ (putStrLn . iHaveNoIdeaWhatToCallThis) $ take 10 $ iterate (+1) 0
     --mapM_ (print . nonRecWithLocalRec) $ take 10 $ iterate (+1) 0
+    --test
+    --mapM_ print (reverse_lst [1,2,3,4,5,6,7,8,9,0])
+    print $ fourthLetBindingTest 1
 
 {-
 Factorial
@@ -124,6 +127,30 @@ iHaveNoIdeaWhatToCallThis n = show (ohLookAnotherFunction (show (n - 1)))
 ohLookAnotherFunction :: String -> Int
 ohLookAnotherFunction str = length (iHaveNoIdeaWhatToCallThis 0)
 
+--{-# ANN doubleNestedLetNonRecBinding "AUTO_CPS" #-}
+doubleNestedLetNonRecBinding :: Int -> Int
+doubleNestedLetNonRecBinding n = case n of
+    0 -> 0
+    _ -> let
+        a = let
+            b = n * n
+            in doubleNestedLetNonRecBinding (b + b)
+        in a + a
+
+--{-# ANN doubleNestedLetRecBinding "AUTO_CPS" #-}
+doubleNestedLetRecBinding :: Int -> Int
+doubleNestedLetRecBinding n = case n of
+    0 -> 0
+    _ -> let
+        f a = case a of
+            0 -> 0
+            _ -> let
+                g b = case b of
+                    0 -> 0
+                    _ -> 1 + g (b - 1)
+                in f (g a)
+        in doubleNestedLetRecBinding (n - 1) + f (n - 1)
+
 --{-# ANN nonRecLetBindingTest "AUTO_CPS" #-}
 nonRecLetBindingTest :: Int -> Int -> Int
 nonRecLetBindingTest n m = case n of
@@ -132,7 +159,7 @@ nonRecLetBindingTest n m = case n of
         a = n - 1
         in nonRecLetBindingTest a a
 
-{-# ANN appPlusToLetBinding "AUTO_CPS" #-}
+--{-# ANN appPlusToLetBinding "AUTO_CPS" #-}
 appPlusToLetBinding :: Int -> Int
 appPlusToLetBinding n = case n of
     0 -> 0
@@ -140,18 +167,30 @@ appPlusToLetBinding n = case n of
         a = appPlusToLetBinding (n - 1)
         in a * a
 
---{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
+{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
 fourthLetBindingTest :: Int -> Int
 fourthLetBindingTest n = case n of
     0 -> 0
     _ -> let
         b = a * 8 + a
         a = n * n
-        f n = case n of
-            0 -> 0
-            _ -> n + f (n - 1)
-        c = f a
+        c = let
+            f n = case n of
+                0 -> 0
+                _ -> n + f (n - 1)
+            in f n
         in a + b + b * fourthLetBindingTest (n - 1) + c * c
+
+fourthLetBindingTestC :: Int -> (Int -> Int) -> Int
+fourthLetBindingTestC n c = case n of
+    0 -> c 0
+    _ -> let
+        b = a * 8 + a
+        a = n * n
+        f n k = case n of
+            0 -> k 0
+            _ -> f (n - 1) (\x -> k (x + n))
+        in f a (\x -> fourthLetBindingTestC (n - 1) (\y -> c (a + b + b * y + x * x)))
 
 --{-# ANN thirdLetBindingTest "AUTO_CPS" #-}
 thirdLetBindingTest :: Int -> Int
@@ -247,10 +286,11 @@ bar :: Int -> Int
 bar 0 = 0
 bar n = n + bar (n - 1)
 
-{-fib :: Int -> Int
+--{-# ANN fib "AUTO_CPS" #-}
+fib :: Int -> Int
 fib 0 = 0
 fib 1 = 1
-fib n = fib (n - 1) + fib (n - 2)-}
+fib n = fib (n - 1) + fib (n - 2)
 
 {-fibC :: Int -> Int
 fibC n = aux n id where
