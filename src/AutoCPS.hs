@@ -64,7 +64,9 @@ transformTopLevelToCPS dflags bind callableFunctions = case bind of
     NonRec coreBndr expr -> do
         let callableFunctions' = coreBndr : callableFunctions
         (_, transformedFunction) <- transformFunctionToCPS dflags (coreBndr, expr) callableFunctions
-        (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions --Use bndrMap for something
+        (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions
+        let funcToAux = Map.fromList bndrMap
+        let recursivecallCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux
         return $ NonRec coreBndr transformedLocals
     Rec lst -> do
         let callableFunctions' = map fst lst ++ callableFunctions
