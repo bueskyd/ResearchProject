@@ -78,15 +78,28 @@ transformTopLevelToCPS dflags bind callableFunctions = case bind of
     where
         aux funcToAux (coreBndr, expr) = do
             let callableFunctions = fst <$> Map.toList funcToAux
+            --Get the auxilary function of the function currently being transformed. This should never fail.
             let auxCoreBndr = fromJust $ Map.lookup coreBndr funcToAux
+
+            --We want the body of the top-level function being transformed to call the auxilary function.
+            --This is only done for top-level functions as we do not want to change public interfaces.
             wrapperBody <- makeWrapperFunctionBody expr auxCoreBndr
+
+            --Transform the function (except inner functions) to CPS.
             (_, transformedFunction) <- transformFunctionToCPS dflags (coreBndr, expr) callableFunctions
+
+            --Transform inner functions to CPS.
             (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions
+
+            --Create a map from all original functions to the corresponding transformed functions.
             let funcToAux' = Map.union funcToAux (Map.fromList bndrMap)
-            mapM_ (putMsgS . showSDoc dflags . ppr) (Map.toList funcToAux)
+
+            --The transformation of local functions to CPS changes the signature of the local functions.
+            --To prevent referencing invalid functions we replace old functions by the new functions.
             let recursiveCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux'
             return ((coreBndr, wrapperBody), (auxCoreBndr, recursiveCallsReplaced))
 
+--Takes a list of top-level functions and maps them to auxilary functions.
 mapFunctionsToAux :: DynFlags -> [CoreBndr] -> CoreM (Map.Map CoreBndr CoreBndr)
 mapFunctionsToAux dflags functions =
     Map.fromList <$> mapM (\func -> do
@@ -258,6 +271,11 @@ transformBodyToCPS dflags expr callableFunctions continuation = aux expr callabl
 
 isFunction :: CoreBndr -> Bool
 isFunction = isJust . splitPiTy_maybe . varType
+
+
+case .. of
+    1 + 
+    1 + 
 
 simplify :: DynFlags -> CoreExpr -> CoreExpr
 simplify dflags expr = aux expr id where

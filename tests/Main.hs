@@ -292,11 +292,17 @@ fib 0 = 0
 fib 1 = 1
 fib n = fib (n - 1) + fib (n - 2)
 
-{-fibC :: Int -> Int
+
+fib :: Int -> Int
+fib 0 = 0
+fib 1 = 1
+fib n = fib (n - 1) + fib (n - 2)
+
+fibC :: Int -> Int
 fibC n = aux n id where
     aux 0 c = c 0
     aux 1 c = c 1
-    aux n c = aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))-}
+    aux n c = aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))
 
 --{-# ANN meme "AUTO_CPS" #-}
 meme :: Int -> Int
