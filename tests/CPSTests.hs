@@ -127,14 +127,14 @@ add x y = x + y
 
 -- Direct-Recursive functions
 
-{-# ANN is_even "AUTO_CPS" #-}
+--{-# ANN is_even "AUTO_CPS" #-}
 is_even :: Int -> Bool
 is_even n = case n of
     0 -> True
     n -> not $ is_even (n-1)
 
 {-# ANN ping "AUTO_CPS" #-}
-{-# ANN pong "AUTO_CPS" #-}
+--{-# ANN pong "AUTO_CPS" #-}
 ping :: Int -> Int
 ping n = case n of 
     0 -> 1
@@ -144,39 +144,39 @@ pong n = case n of
     0 -> -1
     n -> ping (n-1)
 
-{-# ANN factorial "AUTO_CPS" #-}
+--{-# ANN factorial "AUTO_CPS" #-}
 factorial :: Int -> Int
 factorial n = case n of
     0 -> 0
     1 -> 1
     n -> n * factorial (n-1)
 
-{-# ANN sum_to "AUTO_CPS" #-}
+--{-# ANN sum_to "AUTO_CPS" #-}
 sum_to :: Int -> Int
 sum_to n = case n of
     0 -> 0
     n -> n + sum_to (n-1)
 
-{-# ANN sum_list "AUTO_CPS" #-}
+--{-# ANN sum_list "AUTO_CPS" #-}
 sum_list :: [Int] -> Int
 sum_list lst = case lst of
     [] -> 0
     h:t -> h + sum_list t
 
-{-# ANN fibonnaci "AUTO_CPS" #-}
+--{-# ANN fibonnaci "AUTO_CPS" #-}
 fibonnaci :: Int -> Int
 fibonnaci n = case n of
     0 -> 0
     1 -> 1
     n -> fibonnaci (n-1) + fibonnaci (n-2)
 
-{-# ANN reverse_lst "AUTO_CPS" #-}
+--{-# ANN reverse_lst "AUTO_CPS" #-}
 reverse_lst :: [a] -> [a]
 reverse_lst lst = case lst of
     [] -> []
     h:t -> reverse_lst t ++ [h]
 
-{-# ANN palindrome "AUTO_CPS" #-}
+--{-# ANN palindrome "AUTO_CPS" #-}
 palindrome :: Eq a => [a] -> Bool
 palindrome lst = case lst of
     [] -> True

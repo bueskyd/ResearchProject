@@ -18,7 +18,7 @@ main = do_test
     --mapM_ (print . nonRecWithLocalRec) $ take 10 $ iterate (+1) 0
     --test
     --mapM_ print (reverse_lst [1,2,3,4,5,6,7,8,9,0])
-    print $ fourthLetBindingTest 1
+    --print $ fourthLetBindingTest 1
 
 {-
 Factorial
@@ -167,7 +167,7 @@ appPlusToLetBinding n = case n of
         a = appPlusToLetBinding (n - 1)
         in a * a
 
-{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
+--{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
 fourthLetBindingTest :: Int -> Int
 fourthLetBindingTest n = case n of
     0 -> 0

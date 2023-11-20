@@ -70,18 +70,19 @@ transformTopLevelToCPS dflags bind callableFunctions = case bind of
         return $ NonRec coreBndr transformedLocals
     Rec lst -> do
         let callableFunctions' = map fst lst ++ callableFunctions
+        funcToAux <- mapFunctionsToAux dflags callableFunctions'
         transformedFunctions <- mapM (\function -> do
-            (transformed, aux) <- aux callableFunctions' function
+            (transformed, aux) <- aux callableFunctions' funcToAux function
             return [transformed, aux]) lst
         return $ Rec $ join transformedFunctions
     where
-        aux callableFunctions (coreBndr, expr) = do
-            funcToAux <- mapFunctionsToAux dflags callableFunctions
+        aux callableFunctions funcToAux (coreBndr, expr) = do
             let auxCoreBndr = fromJust $ Map.lookup coreBndr funcToAux
             wrapperBody <- makeWrapperFunctionBody expr auxCoreBndr
             (_, transformedFunction) <- transformFunctionToCPS dflags (coreBndr, expr) callableFunctions
             (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions
             let funcToAux' = Map.union funcToAux (Map.fromList bndrMap)
+            mapM_ (putMsgS . showSDoc dflags . ppr) (Map.toList funcToAux)
             let recursiveCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux'
             return ((coreBndr, wrapperBody), (auxCoreBndr, recursiveCallsReplaced))
 
