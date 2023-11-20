@@ -13,41 +13,26 @@ import Test.QuickCheck
 small_nat :: Int -> Gen Int
 small_nat limit = abs `fmap` (arbitrary :: Gen Int) `suchThat` (\i -> (i >= 0) &&  (i < limit))
 
-prop_is_even :: Int -> Bool
-prop_is_even n = is_even n == is_even_cps n
+any_int :: Gen Int
+any_int = arbitrary :: Gen Int
 
-prop_ping :: Int -> Bool
-prop_ping n = ping n == ping_cps id n
-
-prop_pong :: Int -> Bool
-prop_pong n = pong n == pong_cps id n
-
-prop_rev_lst :: [Int] -> Bool
-prop_rev_lst lst = reverse_lst lst == reverse_lst_cps lst
-
-prop_palindrome :: [Int] -> Bool
-prop_palindrome lst = palindrome lst == palindrome_cps lst
-
-prop_sum_lst :: [Int] -> Bool
-prop_sum_lst lst = sum_list lst == sum_list_cps lst
-
-prop_fibonnaci :: Int -> Bool
-prop_fibonnaci i = fibonnaci i == fibonnaci_cps i
-
-prop_factorial :: Int -> Bool
-prop_factorial i = fibonnaci i == fibonnaci_cps i
+check_feq :: Eq b => Show a => Gen a -> (a -> b) -> (a -> b) -> IO ()
+check_feq g f1 f2 = quickCheck $ forAll g (\v -> f1 v == f2 v)
 
 do_test :: IO ()
 do_test = do
     putStrLn "Testing\n"
-    quickCheck $ forAll (small_nat 100) prop_is_even
-    quickCheck $ forAll (small_nat 100) prop_ping
-    quickCheck $ forAll (small_nat 100) prop_pong
-    quickCheck $ forAll (small_nat 20) prop_factorial
-    quickCheck $ forAll (small_nat 20) prop_fibonnaci
-    quickCheck prop_palindrome
-    quickCheck prop_sum_lst
-    quickCheck prop_rev_lst
+    let check f1 f2 = check_feq (small_nat 100) f1 f2
+    check is_even is_even_cps
+    check ping (ping_cps id)
+    check pong (pong_cps id)
+    let check f1 f2 = check_feq (small_nat 20) f1 f2
+    check factorial factorial_cps
+    check fibonnaci fibonnaci_cps
+    let check f1 f2 = check_feq (listOf any_int) f1 f2
+    check palindrome palindrome_cps
+    check sum_list sum_list_cps
+    check reverse_lst reverse_lst_cps
     
 -- Try to use quick-check
 -- Try framework 'critriion' for performance testing
@@ -134,6 +119,7 @@ is_even n = case n of
     n -> not $ is_even (n-1)
 
 {-# ANN ping "AUTO_CPS" #-}
+{-# ANN pong "AUTO_CPS" #-}
 ping :: Int -> Int
 ping n = case n of 
     0 -> 0
