@@ -126,7 +126,17 @@ iHaveNoIdeaWhatToCallThis n = show (ohLookAnotherFunction (show (n - 1)))
 ohLookAnotherFunction :: String -> Int
 ohLookAnotherFunction str = length (iHaveNoIdeaWhatToCallThis 0)
 
-{-# ANN doubleNestedLetRecBinding "AUTO_CPS" #-}
+--{-# ANN doubleNestedLetNonRecBinding "AUTO_CPS" #-}
+doubleNestedLetNonRecBinding :: Int -> Int
+doubleNestedLetNonRecBinding n = case n of
+    0 -> 0
+    _ -> let
+        a = let
+            b = n * n
+            in doubleNestedLetNonRecBinding (b + b)
+        in a + a
+
+--{-# ANN doubleNestedLetRecBinding "AUTO_CPS" #-}
 doubleNestedLetRecBinding :: Int -> Int
 doubleNestedLetRecBinding n = case n of
     0 -> 0
@@ -156,7 +166,7 @@ appPlusToLetBinding n = case n of
         a = appPlusToLetBinding (n - 1)
         in a * a
 
---{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
+{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
 fourthLetBindingTest :: Int -> Int
 fourthLetBindingTest n = case n of
     0 -> 0

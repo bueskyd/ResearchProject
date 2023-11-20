@@ -31,7 +31,7 @@ plugin =
         }
 
 install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
-install _ todo = return (CoreDoPluginPass "Hi mom" pass : todo)
+install _ todo = return (CoreDoPluginPass "AutoCPS" pass : todo)
 
 pass :: ModGuts -> CoreM ModGuts
 pass guts = do
@@ -275,9 +275,8 @@ simplify dflags expr = aux expr id where
                     expr1' = aux expr1 wrapper
                     in Let (Rec lst) (Let (NonRec bndr innerExpr) expr1')
                 Let (NonRec innerBndr innerExpr0) innerExpr1 -> let
-                    expr0' = aux expr0 id
                     expr1' = aux expr1 wrapper
-                    in Let (NonRec bndr expr0') expr1'
+                    in Let (NonRec innerBndr innerExpr0) (Let (NonRec bndr innerExpr1) expr1')
                 _ -> let
                     expr1' = wrapper expr1
                     expr1'' = aux expr1' id
