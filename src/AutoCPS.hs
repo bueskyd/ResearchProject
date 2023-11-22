@@ -117,7 +117,6 @@ transformFunctionToCPS dflags (coreBndr, expr) callableFunctions = do
             newType <- makeCPSFunTy coreBndr
             let transformedCoreBndr = setVarType coreBndr newType
             simplifiedExpr <- simplify dflags expr'
-            putMsgS $ showSDoc dflags $ ppr simplifiedExpr
             transformedBody <- transformBodyToCPS dflags simplifiedExpr callableFunctions continuation
             return (transformedCoreBndr, transformedBody)
 
@@ -326,7 +325,6 @@ simplify dflags expr = aux expr return where
                         rhs'' <- aux rhs' return
                         return $ Alt altCon coreBndrs rhs'')
                 alternatives
-            putMsgS $ showSDoc dflags $ ppr expr
             aux expr (\x -> return $ Case x caseCoreBndr typ altAsCPS)
         Cast expr coercion -> aux expr (\x -> wrapper $ Cast x coercion)
         Tick tickish expr -> aux expr (wrapper . Tick tickish)

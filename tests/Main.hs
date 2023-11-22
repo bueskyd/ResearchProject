@@ -41,7 +41,7 @@ Ackermann function
 Sum of elements in list
 -}
 
-{-# ANN matchOnLet "AUTO_CPS" #-}
+--{-# ANN matchOnLet "AUTO_CPS" #-}
 matchOnLet :: Int -> Int
 matchOnLet n = case let a = n * n in a * a of
     0 -> 0
