@@ -116,7 +116,8 @@ transformFunctionToCPS dflags (coreBndr, expr) callableFunctions = do
         Just expr' -> do
             newType <- makeCPSFunTy coreBndr
             let transformedCoreBndr = setVarType coreBndr newType
-            let simplifiedExpr = simplify dflags expr'
+            simplifiedExpr <- simplify dflags expr'
+            putMsgS $ showSDoc dflags $ ppr simplifiedExpr
             transformedBody <- transformBodyToCPS dflags simplifiedExpr callableFunctions continuation
             return (transformedCoreBndr, transformedBody)
 
@@ -272,60 +273,61 @@ transformBodyToCPS dflags expr callableFunctions continuation = aux expr callabl
 isFunction :: CoreBndr -> Bool
 isFunction = isJust . splitPiTy_maybe . varType
 
-simplify :: DynFlags -> CoreExpr -> CoreExpr
-simplify dflags expr = aux expr id where
-    aux :: CoreExpr -> (CoreExpr -> CoreExpr) -> CoreExpr
+simplify :: DynFlags -> CoreExpr -> CoreM CoreExpr
+simplify dflags expr = aux expr return where
+    aux :: CoreExpr -> (CoreExpr -> CoreM CoreExpr) -> CoreM CoreExpr
     aux expr wrapper = case expr of
         Var id -> wrapper $ Var id
         Lit lit -> wrapper $ Lit lit
         App expr0 expr1 ->
             aux expr0 (\x -> aux expr1 (\y -> wrapper $ App x y))
-        Lam lamCoreBndr expr -> let
-            expr' = aux expr id
-            in wrapper $ Lam lamCoreBndr expr'
+        Lam lamCoreBndr expr -> do
+            expr' <- aux expr return
+            wrapper $ Lam lamCoreBndr expr'
         Let (NonRec bndr expr0) expr1 ->
-            if isFunction bndr then let
-                expr0' = aux expr0 id
-                in aux expr1 (\x -> Let (NonRec bndr expr0') x)
+            if isFunction bndr then do
+                expr0' <- aux expr0 return
+                aux expr1 (\x -> return $ Let (NonRec bndr expr0') x)
             else case expr0 of
-                Let (Rec lst) innerExpr -> let
-                    innerExpr' = aux innerExpr id
-                    expr1' = aux expr1 wrapper
-                    in Let (Rec lst) (Let (NonRec bndr innerExpr') expr1')
-                Let (NonRec innerBndr innerExpr0) innerExpr1 -> let
-                    innerExpr0' = aux innerExpr0 id
-                    innerExpr1' = aux innerExpr1 id
-                    expr1' = aux expr1 wrapper
-                    in Let (NonRec innerBndr innerExpr0') (Let (NonRec bndr innerExpr1') expr1')
-                _ -> let
-                    expr0' = aux expr0 id
-                    expr1' = wrapper expr1
-                    expr1'' = aux expr1' id
-                    in Let (NonRec bndr expr0') expr1''
-        Let (Rec lst) expr -> let
-            lst' = map (\(coreBndr, expr) -> let
-                expr' = aux expr id
-                in (coreBndr, expr')) lst
-            in case expr of
-                Let {} -> let
-                    expr' = aux expr wrapper
-                    in Let (Rec lst') expr'
-                _ -> let
-                    expr' = wrapper expr
-                    expr'' = aux expr' id
-                    in Let (Rec lst') expr''
-        Case expr caseCoreBndr typ alternatives -> let
-            altAsCPS = map
+                Let (Rec lst) innerExpr -> do
+                    innerExpr' <- aux innerExpr return
+                    expr1' <- aux expr1 wrapper
+                    return $ Let (Rec lst) (Let (NonRec bndr innerExpr') expr1')
+                Let (NonRec innerBndr innerExpr0) innerExpr1 -> do
+                    innerExpr0' <- aux innerExpr0 return
+                    innerExpr1' <- aux innerExpr1 return
+                    expr1' <- aux expr1 wrapper
+                    return $ Let (NonRec innerBndr innerExpr0') (Let (NonRec bndr innerExpr1') expr1')
+                _ -> do
+                    expr0' <- aux expr0 return
+                    expr1' <- wrapper expr1
+                    expr1'' <- aux expr1' return
+                    return $ Let (NonRec bndr expr0') expr1''
+        Let (Rec lst) expr -> do
+            lst' <- mapM (\(coreBndr, expr) -> do
+                expr' <- aux expr return
+                return (coreBndr, expr')) lst
+            case expr of
+                Let {} -> do
+                    expr' <- aux expr wrapper
+                    return $ Let (Rec lst') expr'
+                _ -> do
+                    expr' <- wrapper expr
+                    expr'' <- aux expr' return
+                    return $ Let (Rec lst') expr''
+        Case expr caseCoreBndr typ alternatives -> do
+            altAsCPS <- mapM
                 (\(Alt altCon coreBndrs rhs) -> case rhs of
-                    Case {} -> let
-                        rhs' = aux rhs wrapper
-                        in Alt altCon coreBndrs rhs'
-                    _ -> let
-                        rhs' = wrapper rhs
-                        rhs'' = aux rhs' id
-                        in Alt altCon coreBndrs rhs'')
+                    Case {} -> do
+                        rhs' <- aux rhs wrapper
+                        return $ Alt altCon coreBndrs rhs'
+                    _ -> do
+                        rhs' <- wrapper rhs
+                        rhs'' <- aux rhs' return
+                        return $ Alt altCon coreBndrs rhs'')
                 alternatives
-            in aux expr (\x -> Case x caseCoreBndr typ altAsCPS)
+            putMsgS $ showSDoc dflags $ ppr expr
+            aux expr (\x -> return $ Case x caseCoreBndr typ altAsCPS)
         Cast expr coercion -> aux expr (\x -> wrapper $ Cast x coercion)
         Tick tickish expr -> aux expr (wrapper . Tick tickish)
         Type typ -> wrapper $ Type typ

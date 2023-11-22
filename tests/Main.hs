@@ -4,7 +4,7 @@ import CPSTests (do_test)
 import Test.QuickCheck
 
 main :: IO ()
-main = do_test
+main = --do_test
     --print $ meme 7
     --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
     --print $ bar 10
@@ -19,6 +19,16 @@ main = do_test
     --test
     --mapM_ print (reverse_lst [1,2,3,4,5,6,7,8,9,0])
     --print $ fourthLetBindingTest 1
+    {-mapM_ (\n -> do
+        let a = matchOnRecCase n
+        let b = matchOnRecCase1 n
+        let equal = a == b
+        print $ (show a) ++ " " ++ (show b) ++ " " ++ show equal) $ take 10 $ iterate (+1) 0-}
+    mapM_ (\n -> do
+        let a = matchOnLet n
+        let b = matchOnLet1 n
+        let equal = a == b
+        print $ (show a) ++ " " ++ (show b) ++ " " ++ show equal) $ take 10 $ iterate (+1) 0
 
 {-
 Factorial
@@ -30,6 +40,49 @@ String reversal
 Ackermann function
 Sum of elements in list
 -}
+
+{-# ANN matchOnLet "AUTO_CPS" #-}
+matchOnLet :: Int -> Int
+matchOnLet n = case let a = n * n in a * a of
+    0 -> 0
+    _ -> 1 + matchOnLet (n - 1)
+
+matchOnLet1 :: Int -> Int
+matchOnLet1 n = case let a = n * n in a * a of
+    0 -> 0
+    _ -> 1 + matchOnLet1 (n - 1)
+
+--{-# ANN matchOnRecCase "AUTO_CPS" #-}
+matchOnRecCase :: Int -> Int
+matchOnRecCase n = case case n of
+    0 -> 0
+    _ -> 1 + matchOnRecCase (n - 1) of
+    0 -> 0
+    _ -> 1 + matchOnRecCase (n - 1)
+
+--{-# ANN matchOnRecCase "AUTO_CPS" #-}
+matchOnRecCase1 :: Int -> Int
+matchOnRecCase1 n = case case n of
+    0 -> 0
+    _ -> 1 + matchOnRecCase1 (n - 1) of
+    0 -> 0
+    _ -> 1 + matchOnRecCase1 (n - 1)
+
+--{-# ANN matchOnCase "AUTO_CPS" #-}
+matchOnCase :: Int -> Int
+matchOnCase n = case case n of
+    0 -> 0
+    _ -> 1 of
+    0 -> 0
+    _ -> 1 + matchOnCase (n - 1)
+
+matchOnCaseC :: Int -> Int
+matchOnCaseC n = aux n id where
+    aux n c = case case n of
+        0 -> 0
+        _ -> 1 of
+        0 -> c 0
+        _ -> aux (n - 1) (\x -> c (x + 1))
 
 --{-# ANN aaa "AUTO_CPS" #-}
 aaa :: Int -> Int
@@ -167,7 +220,7 @@ appPlusToLetBinding n = case n of
         a = appPlusToLetBinding (n - 1)
         in a * a
 
-{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
+--{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
 fourthLetBindingTest :: Int -> Int
 fourthLetBindingTest n = case n of
     0 -> 0

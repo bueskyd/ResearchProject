@@ -118,8 +118,8 @@ is_even n = case n of
     0 -> True
     n -> not $ is_even (n-1)
 
-{-# ANN ping "AUTO_CPS" #-}
-{-# ANN pong "AUTO_CPS" #-}
+--{-# ANN ping "AUTO_CPS" #-}
+--{-# ANN pong "AUTO_CPS" #-}
 ping :: Int -> Int
 ping n = case n of 
     0 -> 0
