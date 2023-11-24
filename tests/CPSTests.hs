@@ -10,6 +10,8 @@ import System.Random
 
 import Test.QuickCheck
 import Criterion.Main
+import Data.Coerce (coerce)
+import qualified Data.Foldable as List
 
 small_nat :: Int -> Gen Int
 small_nat limit = abs `fmap` (arbitrary :: Gen Int) `suchThat` (\i -> (i >= 0) &&  (i < limit))
@@ -36,29 +38,29 @@ correctness_check = do
     check reverse_lst reverse_lst_cps
 
 
-perf_comp :: Show a => String -> [(String, a -> b)] -> [a] -> IO ()
-perf_comp name fs input = do
-    let inputs = map (\i -> (show i, i)) input
+perf_comp :: String -> (a -> String) -> [(String, a -> b)] -> [a] -> Benchmark
+perf_comp name casef fs input = do
+    let inputs = map (\i -> (casef i, i)) input
     let runs = concat $ map (\(n,i) -> map (\(fn,f) -> bench (fn++":"++n) $ whnf f i) fs) inputs
-    defaultMain [
-        bgroup (name) runs
-        ]
+    bgroup name runs
 
 single :: IO ()
-single = perf_comp "fibonnaci" [("direct", fibonnaci), ("cps", fibonnaci_cps), ("auto", fibonnaci_auto)] [1..32]
+single = defaultMain [perf_comp "sum_list" (show . Prelude.length) [("direct", sum_list), ("cps", sum_list_cps), ("auto", sum_list_auto)] [[1..10], [1..20], [1..40], [1..80], [1..160], [1..320], [1..640]]]
 
 performance_check :: IO ()
 performance_check = do
     putStrLn "Performance runs\n"
-    perf_comp "is_even" [("direct", is_even), ("cps", is_even_cps)] [1, 2, 4, 5, 8, 9, 16, 17, 32, 33]
-    perf_comp "ping" [("direct", ping), ("cps", (ping_cps id))] [1, 2, 4, 5, 8, 9, 16, 17, 32, 33]
-    perf_comp "pong" [("direct", pong), ("cps", (pong_cps id))] [1, 2, 4, 5, 8, 9, 16, 17, 32, 33]
-    perf_comp "factorial" [("direct", factorial), ("cps", factorial)] [1, 2, 4, 8, 16, 32]
-    perf_comp "fibonnaci" [("direct", fibonnaci), ("cps", fibonnaci_cps)] [1, 2, 4, 8, 16, 32]
-    perf_comp "palindrom" [("direct", palindrome), ("cps", palindrome_cps)] [[0..1], [0..2], [0..4], [0..8], [0..16], [0..32], [0..64]]
-    perf_comp "sum_list" [("direct", sum_list), ("cps", sum_list_cps)] [[0..1], [0..2], [0..4], [0..8], [0..16], [0..32], [0..64]]
-    perf_comp "reverse_list" [("direct", reverse_lst), ("cps", reverse_lst_cps)] [[0..1], [0..2], [0..4], [0..8], [0..16], [0..32], [0..64]]
-    
+    defaultMain [
+            perf_comp "is_even" show [("direct", is_even), ("cps", is_even_cps), ("auto", is_even_auto)] [1, 2, 4, 5, 8, 9, 16, 17, 32, 33],
+            perf_comp "ping" show [("direct", ping), ("cps", ping_cps id), ("auto", ping_auto)] [1, 2, 4, 5, 8, 9, 16, 17, 32, 33],
+            perf_comp "pong" show [("direct", pong), ("cps", pong_cps id), ("auto", pong_auto)] [1, 2, 4, 5, 8, 9, 16, 17, 32, 33],
+            perf_comp "factorial" show [("direct", factorial), ("cps", factorial), ("auto", factorial_auto)] [1, 2, 4, 8, 16, 32],
+            perf_comp "fibonnaci" show [("direct", fibonnaci), ("cps", fibonnaci_cps), ("auto", fibonnaci_auto)] [16..32],
+            perf_comp "palindrome" (show . Prelude.length) [("direct", palindrome), ("cps", palindrome_cps), ("auto", palindrome_auto)] [[0..1], [0..2], [0..4], [0..8], [0..16], [0..32], [0..64]],
+            perf_comp "sum_list" (show . Prelude.length) [("direct", sum_list), ("cps", sum_list_cps), ("auto", sum_list_auto)] [[1..10], [1..20], [1..40], [1..80], [1..160], [1..320], [1..640]],
+            perf_comp "reverse_list" (show . Prelude.length) [("direct", reverse_lst), ("cps", reverse_lst_cps), ("auto", reverse_lst_auto)] [[1..10], [1..20], [1..40], [1..80], [1..160], [1..320], [1..640]]
+        ]
+
 
 {-test :: IO ()
 test = do
@@ -144,11 +146,11 @@ is_even n = case n of
     n -> not $ is_even (n-1)
 
 ping :: Int -> Int
-ping n = case n of 
+ping n = case n of
     0 -> 0
     n -> pong (n-1) + 1
 pong :: Int -> Int
-pong n = case n of 
+pong n = case n of
     0 -> 0
     n -> ping (n-1) - 1
 
@@ -199,11 +201,11 @@ is_even_auto n = case n of
 {-# ANN ping "AUTO_CPS" #-}
 {-# ANN pong "AUTO_CPS" #-}
 ping_auto :: Int -> Int
-ping_auto n = case n of 
+ping_auto n = case n of
     0 -> 0
     n -> pong (n-1) + 1
 pong_auto :: Int -> Int
-pong_auto n = case n of 
+pong_auto n = case n of
     0 -> 0
     n -> ping (n-1) - 1
 
@@ -255,16 +257,16 @@ is_even_cps :: Int -> Bool
 is_even_cps n = aux id n where
     aux c n = case n of
         0 -> c True
-        n -> aux (\e -> c(not e)) (n-1)
+        n -> aux (\e -> c (not e)) (n-1)
 
 ping_cps :: (Int -> Int) -> Int -> Int
-ping_cps c n = case n of 
+ping_cps c n = case n of
     0 -> c 0
-    n -> pong_cps (\i -> c(i + 1)) (n-1)
+    n -> pong_cps (\i -> c (i + 1)) (n-1)
 pong_cps :: (Int -> Int) -> Int -> Int
-pong_cps c n = case n of 
+pong_cps c n = case n of
     0 -> c 0
-    n -> ping_cps (\i -> c(i - 1)) (n-1)
+    n -> ping_cps (\i -> c (i - 1)) (n-1)
 
 factorial_cps :: Int -> Int
 factorial_cps n = aux id n where
