@@ -27,15 +27,23 @@ correctness_check = do
     putStrLn "Functional equivilance checks\n"
     let check f1 f2 = check_feq (small_nat 100) f1 f2
     check is_even is_even_cps
+    check is_even is_even_auto
     check ping (ping_cps id)
+    check ping ping_auto
     check pong (pong_cps id)
+    check pong pong_auto
     let check f1 f2 = check_feq (small_nat 20) f1 f2
     check factorial factorial_cps
+    check factorial factorial_auto
     check fibonnaci fibonnaci_cps
+    check fibonnaci fibonnaci_auto
     let check f1 f2 = check_feq (listOf any_int) f1 f2
     check palindrome palindrome_cps
+    check palindrome palindrome_auto
     check sum_list sum_list_cps
+    check sum_list sum_list_auto
     check reverse_lst reverse_lst_cps
+    check reverse_lst reverse_lst_auto
 
 
 perf_comp :: String -> (a -> String) -> [(String, a -> b)] -> [a] -> Benchmark
@@ -192,62 +200,62 @@ palindrome lst = case lst of
 -- AutoCPS transformed
 -- ###
 
-{-# ANN is_even "AUTO_CPS" #-}
+{-# ANN is_even_auto "AUTO_CPS" #-}
 is_even_auto :: Int -> Bool
 is_even_auto n = case n of
     0 -> True
-    n -> not $ is_even (n-1)
+    n -> not $ is_even_auto (n-1)
 
-{-# ANN ping "AUTO_CPS" #-}
-{-# ANN pong "AUTO_CPS" #-}
+{-# ANN ping_auto "AUTO_CPS" #-}
+{-# ANN pong_auto "AUTO_CPS" #-}
 ping_auto :: Int -> Int
 ping_auto n = case n of
     0 -> 0
-    n -> pong (n-1) + 1
+    n -> pong_auto (n-1) + 1
 pong_auto :: Int -> Int
 pong_auto n = case n of
     0 -> 0
-    n -> ping (n-1) - 1
+    n -> ping_auto (n-1) - 1
 
-{-# ANN factorial "AUTO_CPS" #-}
+{-# ANN factorial_auto "AUTO_CPS" #-}
 factorial_auto :: Int -> Int
 factorial_auto n = case n of
     0 -> 1
     1 -> 1
-    n -> n * factorial (n-1)
+    n -> n * factorial_auto (n-1)
 
-{-# ANN sum_to "AUTO_CPS" #-}
+{-# ANN sum_to_auto "AUTO_CPS" #-}
 sum_to_auto :: Int -> Int
 sum_to_auto n = case n of
     0 -> 0
-    n -> n + sum_to (n-1)
+    n -> n + sum_to_auto (n-1)
 
-{-# ANN sum_list "AUTO_CPS" #-}
+{-# ANN sum_list_auto "AUTO_CPS" #-}
 sum_list_auto :: [Int] -> Int
 sum_list_auto lst = case lst of
     [] -> 0
-    h:t -> h + sum_list t
+    h:t -> h + sum_list_auto t
 
-{-# ANN fibonnaci "AUTO_CPS" #-}
+{-# ANN fibonnaci_auto "AUTO_CPS" #-}
 fibonnaci_auto :: Int -> Int
 fibonnaci_auto n = case n of
     0 -> 0
     1 -> 1
-    n -> fibonnaci (n-1) + fibonnaci (n-2)
+    n -> fibonnaci_auto (n-1) + fibonnaci_auto (n-2)
 
-{-# ANN reverse_lst "AUTO_CPS" #-}
+{-# ANN reverse_lst_auto "AUTO_CPS" #-}
 reverse_lst_auto :: [a] -> [a]
 reverse_lst_auto lst = case lst of
     [] -> []
-    h:t -> reverse_lst t ++ [h]
+    h:t -> reverse_lst_auto t ++ [h]
 
-{-# ANN palindrome "AUTO_CPS" #-}
+{-# ANN palindrome_auto "AUTO_CPS" #-}
 palindrome_auto :: Eq a => [a] -> Bool
 palindrome_auto lst = case lst of
     [] -> True
     [a] -> True
     h:t -> case reverse t of
-        h1:t1 -> (h == h1) && palindrome (reverse t1)
+        h1:t1 -> (h == h1) && palindrome_auto (reverse t1)
 
 -- ###
 -- CPS-Recursive functions
