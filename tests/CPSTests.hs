@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use camelCase" #-}
-{-# LANGUAGE Strict #-}
+--{-# LANGUAGE Strict #-}
 
 module CPSTests where
 
@@ -12,6 +12,11 @@ import Test.QuickCheck
 import Criterion.Main
 import Data.Coerce (coerce)
 import qualified Data.Foldable as List
+
+
+------
+-- Correctness
+------
 
 small_nat :: Int -> Gen Int
 small_nat limit = abs `fmap` (arbitrary :: Gen Int) `suchThat` (\i -> (i >= 0) &&  (i < limit))
@@ -45,6 +50,9 @@ correctness_check = do
     check reverse_lst reverse_lst_cps
     check reverse_lst reverse_lst_auto
 
+------
+-- Performance
+------
 
 perf_comp :: String -> (a -> String) -> [(String, a -> b)] -> [a] -> Benchmark
 perf_comp name casef fs input = do
@@ -57,7 +65,7 @@ single = defaultMain [perf_comp "sum_list" (show . Prelude.length) [("direct", s
 
 performance_check :: IO ()
 performance_check = do
-    putStrLn "Performance runs\n"
+    putStrLn "Performance runs"
     defaultMain [
             perf_comp "is_even" show [("direct", is_even), ("cps", is_even_cps), ("auto", is_even_auto)] [1, 2, 4, 5, 8, 9, 16, 17, 32, 33],
             perf_comp "ping" show [("direct", ping), ("cps", ping_cps id), ("auto", ping_auto)] [1, 2, 4, 5, 8, 9, 16, 17, 32, 33],
@@ -68,6 +76,17 @@ performance_check = do
             perf_comp "sum_list" (show . Prelude.length) [("direct", sum_list), ("cps", sum_list_cps), ("auto", sum_list_auto)] [[1..10], [1..20], [1..40], [1..80], [1..160], [1..320], [1..640]],
             perf_comp "reverse_list" (show . Prelude.length) [("direct", reverse_lst), ("cps", reverse_lst_cps), ("auto", reverse_lst_auto)] [[1..10], [1..20], [1..40], [1..80], [1..160], [1..320], [1..640]]
         ]
+
+------
+-- Breaking
+------
+
+find_breaking_point :: (a -> b) -> (a -> a) -> (a -> String) -> a -> IO ()
+find_breaking_point f step to_string input = do
+    putStrLn $ to_string input
+    f input `seq` find_breaking_point f step to_string (step input)
+        
+
 
 
 {-test :: IO ()
@@ -144,14 +163,14 @@ add x y = x + y
     Sum of elements in list
 -}
 
--- ###
+------
 -- Direct-Recursive functions
--- ###
+------
 
 is_even :: Int -> Bool
 is_even n = case n of
     0 -> True
-    n -> not $ is_even (n-1)
+    n -> not (is_even (n-1))
 
 ping :: Int -> Int
 ping n = case n of
@@ -196,9 +215,17 @@ palindrome lst = case lst of
     h:t -> case reverse t of
         h1:t1 -> (h == h1) && palindrome (reverse t1)
 
--- ###
+ackermann :: (Int, Int, Int) -> Int
+ackermann input = case input of
+    (m,n,0) -> m + n
+    (m,0,1) -> 0
+    (m,0,2) -> 1
+    (m,0,p) -> m
+    (m,n,p) -> ackermann (m, ackermann(m,n-1,p), p-1)
+
+------
 -- AutoCPS transformed
--- ###
+------
 
 {-# ANN is_even_auto "AUTO_CPS" #-}
 is_even_auto :: Int -> Bool
@@ -257,9 +284,18 @@ palindrome_auto lst = case lst of
     h:t -> case reverse t of
         h1:t1 -> (h == h1) && palindrome_auto (reverse t1)
 
--- ###
+{-# ANN ackermann_auto "AUTO_CPS" #-}
+ackermann_auto :: (Int, Int, Int) -> Int
+ackermann_auto input = case input of
+    (m,n,0) -> m + n
+    (m,0,1) -> 0
+    (m,0,2) -> 1
+    (m,0,p) -> m
+    (m,n,p) -> ackermann_auto (m, ackermann_auto(m,n-1,p), p-1)
+
+------
 -- CPS-Recursive functions
--- ###
+------
 
 is_even_cps :: Int -> Bool
 is_even_cps n = aux id n where
@@ -315,3 +351,13 @@ palindrome_cps lst = aux id lst where
         [a] -> c True
         h:t -> case reverse t of
             h1:t1 -> aux (\x -> c ((h == h1) && x)) (reverse t1)
+{-
+ackermann_cps :: (Int, Int, Int) -> Int
+ackermann_cps input =  aux id input where 
+    aux c input = case input of
+        (m,n,0) -> c (m + n)
+        (m,0,1) -> c 0
+        (m,0,2) -> c 1
+        (m,0,p) -> c m
+        (m,n,p) -> aux (m, aux(m,n-1,p), p-1)
+-}

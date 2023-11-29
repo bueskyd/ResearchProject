@@ -1,10 +1,10 @@
 module Main where
 
-import CPSTests (do_test)
+import CPSTests (correctness_check, performance_check, single, find_breaking_point, fibonnaci)
 import Test.QuickCheck
 
 main :: IO ()
-main = --do_test
+main = find_breaking_point fibonnaci (+ 1) show 0
     --print $ meme 7
     --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
     --print $ bar 10
@@ -24,11 +24,11 @@ main = --do_test
         let b = matchOnRecCase1 n
         let equal = a == b
         print $ (show a) ++ " " ++ (show b) ++ " " ++ show equal) $ take 10 $ iterate (+1) 0-}
-    mapM_ (\n -> do
+    {-mapM_ (\n -> do
         let a = matchOnLet n
         let b = matchOnLet1 n
         let equal = a == b
-        print $ (show a) ++ " " ++ (show b) ++ " " ++ show equal) $ take 10 $ iterate (+1) 0
+        print $ (show a) ++ " " ++ (show b) ++ " " ++ show equal) $ take 10 $ iterate (+1) 0-}
 
 {-
 Factorial
