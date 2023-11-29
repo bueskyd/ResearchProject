@@ -1,10 +1,10 @@
 module Main where
 
-import CPSTests (do_test)
+import CPSTests (correctness_check, performance_check, single, find_breaking_point, fibonnaci)
 import Test.QuickCheck
 
 main :: IO ()
-main = do_test
+main = find_breaking_point fibonnaci (+ 1) show 0
     --print $ meme 7
     --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
     --print $ bar 10
