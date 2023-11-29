@@ -4,7 +4,7 @@ import CPSTests (do_test)
 import Test.QuickCheck
 
 main :: IO ()
-main = --do_test
+main = do_test
     --print $ meme 7
     --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
     --print $ bar 10
@@ -24,11 +24,11 @@ main = --do_test
         let b = matchOnRecCase1 n
         let equal = a == b
         print $ (show a) ++ " " ++ (show b) ++ " " ++ show equal) $ take 10 $ iterate (+1) 0-}
-    mapM_ (\n -> do
+    {-mapM_ (\n -> do
         let a = matchOnLet n
         let b = matchOnLet1 n
         let equal = a == b
-        print $ (show a) ++ " " ++ (show b) ++ " " ++ show equal) $ take 10 $ iterate (+1) 0
+        print $ (show a) ++ " " ++ (show b) ++ " " ++ show equal) $ take 10 $ iterate (+1) 0-}
 
 {-
 Factorial
@@ -142,8 +142,8 @@ innerCallsOuterC n = inner n where
 outerCalledByInnerC :: Int -> Int
 outerCalledByInnerC n = innerCallsOuterC n
 
---{-# ANN nonRecWithLocalRec "AUTO_CPS" #-}
-nonRecWithLocalRec :: Int -> Int
+{-# ANN nonRecWithLocalRec "AUTO_CPS" #-}
+nonRecWithLocalRec :: Int -> Int                                --This one crashes
 nonRecWithLocalRec n = aux n where
     aux 0 = 0
     aux n = 1 + aux (n - 1)
