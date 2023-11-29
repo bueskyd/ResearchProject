@@ -53,15 +53,21 @@ pass guts = do
                     lst0
             if do_transform then do
                 originalIsTailRecursive <- isTailRecursive dflags bind
-                putMsgS $ "Original is tail-recursive: " ++ show originalIsTailRecursive
-                cps <- transformTopLevelToCPS dflags bind []
-                transformedIsTailRecursive <- isTailRecursive dflags cps
-                putMsgS $ "Transformed is tail-recursive: " ++ show transformedIsTailRecursive
-                putMsgS "Original"
-                putMsgS $ showSDoc dflags (ppr bind)
-                putMsgS "Transformed to CPS"
-                putMsgS $ showSDoc dflags (ppr cps)
-                return cps
+                if originalIsTailRecursive then do
+                    putMsgS "Function is already tail-recursive. Continuing to next function."
+                    return bind
+                else do
+                    cps <- transformTopLevelToCPS dflags bind []
+                    transformedIsTailRecursive <- isTailRecursive dflags cps
+                    if transformedIsTailRecursive then
+                        putMsgS "Successfully transformed function to CPS"
+                    else
+                        putMsgS "Failed to transform function to CPS"
+                    putMsgS "Original"
+                    putMsgS $ showSDoc dflags (ppr bind)
+                    putMsgS "Transformed to CPS"
+                    putMsgS $ showSDoc dflags (ppr cps)
+                    return cps
             else return bind
 
 transformTopLevelToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
@@ -117,7 +123,6 @@ transformFunctionToCPS :: DynFlags -> (CoreBndr, CoreExpr) -> [CoreBndr] -> Core
 transformFunctionToCPS dflags (coreBndr, expr) callableFunctions = do
     continuationType <- makeContinuationType coreBndr
     continuation <- makeVar "cont" continuationType
-    putMsgS $ "Transforming body of " ++ showSDoc dflags (ppr coreBndr)
     case prependArg expr continuation of
         Nothing -> return (coreBndr, expr) -- expr is not a lambda
         Just expr' -> do
