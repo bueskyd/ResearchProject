@@ -68,8 +68,10 @@ transformTopLevelToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
 transformTopLevelToCPS dflags bind callableFunctions = case bind of
     NonRec coreBndr expr -> do
         let callableFunctions' = coreBndr : callableFunctions
-        (_, transformedFunction) <- transformFunctionToCPS dflags (coreBndr, expr) callableFunctions
-        (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedFunction callableFunctions
+        simplifiedExpr <- simplify dflags expr
+        continuation <- mkIdentityFromReturnType coreBndr
+        transformedBody <- transformBodyToCPS dflags simplifiedExpr callableFunctions continuation
+        (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedBody callableFunctions
         let funcToAux = Map.fromList bndrMap
         let recursivecallCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux
         return $ NonRec coreBndr transformedLocals
@@ -122,7 +124,7 @@ transformFunctionToCPS dflags (coreBndr, expr) callableFunctions = do
             newType <- makeCPSFunTy coreBndr
             let transformedCoreBndr = setVarType coreBndr newType
             simplifiedExpr <- simplify dflags expr'
-            transformedBody <- transformBodyToCPS dflags simplifiedExpr callableFunctions continuation
+            transformedBody <- transformBodyToCPS dflags simplifiedExpr callableFunctions (Var continuation)
             return (transformedCoreBndr, transformedBody)
 
 transformLocalFunctionsToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreM (CoreExpr, [(CoreBndr, CoreBndr)])
@@ -174,13 +176,13 @@ transformLocalFunctionsToCPS dflags expr callableFunctions = case expr of
     Type typ -> return (Type typ, [])
     Coercion coercion -> return (Coercion coercion, [])
 
-transformBodyToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreBndr -> CoreM CoreExpr
+transformBodyToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreExpr -> CoreM CoreExpr
 transformBodyToCPS dflags expr callableFunctions continuation = aux expr callableFunctions True where
     aux :: CoreExpr -> [CoreBndr] -> Bool -> CoreM CoreExpr
     aux expr callableFunctions inTailPosition = case expr of
         Var id ->
             if inTailPosition then
-                return $ App (Var continuation) (Var id)
+                return $ App continuation (Var id)
             else
                 return $ Var id
         Lit lit -> return $ Lit lit
@@ -194,18 +196,18 @@ transformBodyToCPS dflags expr callableFunctions continuation = aux expr callabl
                     | hasReplacedCalls = let
                         combiningCall =
                             if isCallToAny dflags exprWithBindings callableFunctionNames then
-                                App exprWithBindings (Var continuation)
+                                App exprWithBindings continuation
                             else
-                                App (Var continuation) exprWithBindings
+                                App continuation exprWithBindings
                         tailRecExpr = Data.Foldable.foldl'
                                 (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
                                 combiningCall
                                 newBindings
                         in tailRecExpr
                     | inTailPosition = if isRecursiveCall then
-                                App (App expr0 expr1) (Var continuation)
+                                App (App expr0 expr1) continuation
                             else
-                                App (Var continuation) exprWithBindings
+                                App continuation exprWithBindings
                     | otherwise = App expr0 expr1
             return transformedApp
         Lam lamCoreBndr lamExpr -> do
