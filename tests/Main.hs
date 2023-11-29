@@ -142,8 +142,8 @@ innerCallsOuterC n = inner n where
 outerCalledByInnerC :: Int -> Int
 outerCalledByInnerC n = innerCallsOuterC n
 
-{-# ANN nonRecWithLocalRec "AUTO_CPS" #-}
-nonRecWithLocalRec :: Int -> Int                                --This one crashes
+--{-# ANN nonRecWithLocalRec "AUTO_CPS" #-}
+nonRecWithLocalRec :: Int -> Int
 nonRecWithLocalRec n = aux n where
     aux 0 = 0
     aux n = 1 + aux (n - 1)
