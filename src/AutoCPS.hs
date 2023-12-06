@@ -4,6 +4,7 @@ import Control.Monad (forM_, join, mapAndUnzipM, unless, void, when)
 import Data.Data
 import qualified Data.Foldable
 import Data.Maybe (fromMaybe, isJust, fromJust)
+import Data.List (intercalate)
 import Data.Typeable
 import Debug.Trace
 import GHC.Builtin.Types (manyDataConTy)
@@ -43,32 +44,40 @@ pass guts = do
         autoCPS :: DynFlags -> CoreBind -> CoreM CoreBind --(CoreBndr, Expr CoreBndr)
         autoCPS dflags bind = do
             do_transform <- case bind of
-                NonRec coreBndr _ ->
-                    (\anns -> "AUTO_CPS" `elem` anns) <$> (annotationsOn guts coreBndr :: CoreM [String])
-                Rec lst0 -> Data.Foldable.foldl'
-                    (\acc (b,e) ->
-                        acc >>= \a ->
-                            (\anns -> "AUTO_CPS" `elem` anns || a) <$> (annotationsOn guts b :: CoreM [String]))
-                    (return False)
-                    lst0
-            if do_transform then do
-                originalIsTailRecursive <- isTailRecursive dflags bind
-                if originalIsTailRecursive then do
-                    putMsgS "Function is already tail-recursive. Continuing to next function."
-                    return bind
-                else do
-                    cps <- transformTopLevelToCPS dflags bind []
-                    transformedIsTailRecursive <- isTailRecursive dflags cps
-                    if transformedIsTailRecursive then
-                        putMsgS "Successfully transformed function to CPS"
-                    else
-                        putMsgS "Failed to transform function to CPS"
-                    putMsgS "Original"
-                    putMsgS $ showSDoc dflags (ppr bind)
-                    putMsgS "Transformed to CPS"
-                    putMsgS $ showSDoc dflags (ppr cps)
-                    return cps
-            else return bind
+                NonRec coreBndr _ -> do
+                    shouldTransform <- (\anns -> "AUTO_CPS" `elem` anns) <$> (annotationsOn guts coreBndr :: CoreM [String])
+                    return $ if shouldTransform then Just $ getCoreBndrNames dflags bind else Nothing
+                Rec lst -> do
+                    shouldTransform <- Data.Foldable.foldl'
+                        (\acc (b,e) ->
+                            acc >>= \a ->
+                                (\anns -> "AUTO_CPS" `elem` anns || a) <$> (annotationsOn guts b :: CoreM [String]))
+                        (return False)
+                        lst
+                    return $ if shouldTransform then Just $ getCoreBndrNames dflags bind else Nothing
+            case do_transform of
+                Just names -> do
+                    originalIsTailRecursive <- isTailRecursive dflags bind
+                    let verb = if length names > 1 then "are" else "is"
+                    let namesString = intercalate ", " (take (length names - 1) names)
+                    let lastName = head $ reverse names
+                    let namesString' = namesString ++ ", and " ++ lastName
+                    if originalIsTailRecursive then do
+                        putMsgS $ namesString' ++ " " ++ verb ++ " already tail-recursive. Continuing to next function."
+                        return bind
+                    else do
+                        cps <- transformTopLevelToCPS dflags bind []
+                        transformedIsTailRecursive <- isTailRecursive dflags cps
+                        if transformedIsTailRecursive then
+                            putMsgS $ "Successfully transformed " ++ namesString' ++ " to CPS"
+                        else
+                            putMsgS $ "Failed to transform " ++ namesString' ++ " to CPS"
+                        putMsgS "Original"
+                        putMsgS $ showSDoc dflags (ppr bind)
+                        putMsgS "Transformed to CPS"
+                        putMsgS $ showSDoc dflags (ppr cps)
+                        return cps
+                Nothing -> return bind
 
 transformTopLevelToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
 transformTopLevelToCPS dflags bind callableFunctions = case bind of
@@ -487,9 +496,10 @@ mkIdentityFromReturnType coreBndr = do
     tyVarUnique <- getUniqueM
     let returnType = getReturnType coreBndr
     let kind = typeKind returnType
-    let typeVariable = mkTyVar (mkSystemVarName tyVarUnique (mkFastString "ty")) kind
-    let tyVarTy = mkTyVarTy typeVariable
-    let var = mkLocalVar VanillaId varName Many tyVarTy vanillaIdInfo
+    --let typeVariable = mkTyVar (mkSystemVarName tyVarUnique (mkFastString "ty")) kind
+    --let tyVarTy = mkTyVarTy typeVariable
+    --let var = mkLocalVar VanillaId varName Many tyVarTy vanillaIdInfo
+    let var = mkLocalVar VanillaId varName Many kind vanillaIdInfo
     return $ mkCoreLams [var] (Var var)
 
 wrapCPS :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr) -> CoreM CoreExpr

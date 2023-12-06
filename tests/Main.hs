@@ -1,6 +1,6 @@
 module Main where
 
-import CPSTests (correctness_check, performance_check, single, find_breaking_point, fibonnaci)
+import CPSTests (correctness_check, performance_check, single, find_breaking_point, fibonnaci, reverse_lst_auto)
 import Test.QuickCheck
 
 main :: IO ()
@@ -41,6 +41,13 @@ Ackermann function
 Sum of elements in list
 -}
 
+--{-# ANN mutuallyTailRec0 "AUTO_CPS" #-}
+mutuallyTailRec0 :: Int -> Int
+mutuallyTailRec0 n = mutuallyTailRec1 (n - 1)
+
+mutuallyTailRec1 :: Int -> Int
+mutuallyTailRec1 n = mutuallyTailRec0 (n - 1)
+
 --{-# ANN matchOnLet "AUTO_CPS" #-}
 matchOnLet :: Int -> Int
 matchOnLet n = case let a = n * n in a * a of
@@ -60,7 +67,6 @@ matchOnRecCase n = case case n of
     0 -> 0
     _ -> 1 + matchOnRecCase (n - 1)
 
---{-# ANN matchOnRecCase "AUTO_CPS" #-}
 matchOnRecCase1 :: Int -> Int
 matchOnRecCase1 n = case case n of
     0 -> 0
