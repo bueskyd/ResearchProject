@@ -214,7 +214,11 @@ transformBodyToCPS dflags expr callableFunctions continuation = aux expr callabl
                             else
                                 App continuation exprWithBindings
                         tailRecExpr = Data.Foldable.foldl'
-                                (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
+                                (\acc (coreBndr, coreExpr) -> 
+                                    let ty = getReturnType coreBndr in
+                                    App coreExpr $ Lam coreBndr (Case (Var coreBndr) (coreBndr) ty [Alt DEFAULT [] acc])
+                                    --App coreExpr $ Lam coreBndr acc
+                                )
                                 combiningCall
                                 newBindings
                         in tailRecExpr
@@ -251,6 +255,8 @@ transformBodyToCPS dflags expr callableFunctions continuation = aux expr callabl
                     let varTyp = varType bndr
                     let newBindingName = mkLocalVar VanillaId varName Many varTyp vanillaIdInfo
                     let newLetBinding = Let (NonRec bndr (Var newBindingName)) expr1'
+                    --let (_, returnType) = splitFunTys varTyp
+                    --let meme = Case (newLetBinding) (newBindingName) (returnType) [Alt DEFAULT [] expr1'] :: CoreExpr
                     let continuationLam = Lam newBindingName newLetBinding
                     return $ App expr0 continuationLam
                 else
