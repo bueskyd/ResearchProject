@@ -59,9 +59,14 @@ pass guts = do
                 Just names -> do
                     originalIsTailRecursive <- isTailRecursive dflags bind
                     let verb = if length names > 1 then "are" else "is"
-                    let namesString = intercalate ", " (take (length names - 1) names)
-                    let lastName = head $ reverse names
-                    let namesString' = namesString ++ ", and " ++ lastName
+                    let nameCount = length names
+                    let namesString'
+                            | nameCount == 1 = head names
+                            | nameCount == 2 = head names ++ " and " ++ (head $ tail names)
+                            | otherwise = let
+                                namesString = intercalate ", " (take (length names - 1) names)
+                                lastName = head $ reverse names
+                                in namesString ++ ", and " ++ lastName
                     if originalIsTailRecursive then do
                         putMsgS $ namesString' ++ " " ++ verb ++ " already tail-recursive. Continuing to next function."
                         return bind
@@ -79,13 +84,38 @@ pass guts = do
                         return cps
                 Nothing -> return bind
 
+printCaseTypes :: DynFlags -> CoreBind -> CoreM ()
+printCaseTypes dflags bind = case bind of
+    NonRec coreBndr expr -> aux expr
+    Rec lst -> mapM_ (\(coreBndr, expr) -> aux expr) lst
+    where
+        aux expr = case expr of
+            Var id -> return ()
+            Lit lit -> return () 
+            App expr0 expr1 -> do
+                aux expr0
+                aux expr1
+            Lam coreBndr expr -> aux expr
+            Let bind expr -> do
+                case bind of
+                    NonRec localCoreBndr localExpr -> aux localExpr
+                    Rec lst -> mapM_ (\(localCoreBndr, localExpr) -> aux localExpr) lst
+                aux expr
+            Case expr coreBndr typ alts -> do
+                putMsgS $ showSDoc dflags $ ppr typ
+                mapM_ (\(Alt altCon localCoreBndrs localExpr) -> aux localExpr) alts
+            Cast expr coercion -> aux expr
+            Tick tickish expr -> aux expr
+            Type typ -> return ()
+            Coercion coercion -> return ()
+
 transformTopLevelToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
 transformTopLevelToCPS dflags bind callableFunctions = case bind of
     NonRec coreBndr expr -> do
         let callableFunctions' = coreBndr : callableFunctions
         simplifiedExpr <- simplify dflags expr
         continuation <- mkIdentityFromReturnType coreBndr
-        transformedBody <- transformBodyToCPS dflags simplifiedExpr callableFunctions continuation
+        transformedBody <- transformBodyToCPS dflags coreBndr simplifiedExpr callableFunctions continuation
         (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedBody callableFunctions
         let funcToAux = Map.fromList bndrMap
         let recursivecallCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux
@@ -138,7 +168,7 @@ transformFunctionToCPS dflags (coreBndr, expr) callableFunctions = do
             newType <- makeCPSFunTy coreBndr
             let transformedCoreBndr = setVarType coreBndr newType
             simplifiedExpr <- simplify dflags expr'
-            transformedBody <- transformBodyToCPS dflags simplifiedExpr callableFunctions (Var continuation)
+            transformedBody <- transformBodyToCPS dflags coreBndr simplifiedExpr callableFunctions (Var continuation)
             return (transformedCoreBndr, transformedBody)
 
 transformLocalFunctionsToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreM (CoreExpr, [(CoreBndr, CoreBndr)])
@@ -190,8 +220,8 @@ transformLocalFunctionsToCPS dflags expr callableFunctions = case expr of
     Type typ -> return (Type typ, [])
     Coercion coercion -> return (Coercion coercion, [])
 
-transformBodyToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreExpr -> CoreM CoreExpr
-transformBodyToCPS dflags expr callableFunctions continuation = aux expr callableFunctions True where
+transformBodyToCPS :: DynFlags -> CoreBndr -> CoreExpr -> [CoreBndr] -> CoreExpr -> CoreM CoreExpr
+transformBodyToCPS dflags originalCoreBndr expr callableFunctions continuation = aux expr callableFunctions True where
     aux :: CoreExpr -> [CoreBndr] -> Bool -> CoreM CoreExpr
     aux expr callableFunctions inTailPosition = case expr of
         Var id ->
@@ -213,9 +243,11 @@ transformBodyToCPS dflags expr callableFunctions continuation = aux expr callabl
                                 App exprWithBindings continuation
                             else
                                 App continuation exprWithBindings
+                        firstCoreBndr = fst $ head newBindings
+                        caseExprType = getReturnType originalCoreBndr
                         tailRecExpr = Data.Foldable.foldl'
                                 (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
-                                combiningCall
+                                (Case (Var firstCoreBndr) firstCoreBndr caseExprType [Alt DEFAULT [] combiningCall])
                                 newBindings
                         in tailRecExpr
                     | inTailPosition = if isRecursiveCall then
@@ -422,14 +454,10 @@ replaceNonTailCalls dflags expr callableFunctions inTailPosition = aux expr call
             case maybeCall of
                 Just calledCoreBndr -> do
                     let returnType = getReturnType calledCoreBndr
-                    let kind = typeKind returnType
-                    tyVarUnique <- getUniqueM
-                    let typeVariable = mkTyVar (mkSystemVarName tyVarUnique (mkFastString "ty")) kind
-                    let tyVarTy = mkTyVarTy typeVariable
                     varUnique <- getUniqueM
                     let varName = mkSystemVarName varUnique (mkFastString "contBndr")
-                    let newBindingName = mkLocalVar VanillaId varName Many tyVarTy vanillaIdInfo
-                    return (App expr0' (Var newBindingName), (newBindingName, expr1') : newBindings0 ++ newBindings1)
+                    let newBinding = mkLocalVar VanillaId varName Many returnType vanillaIdInfo
+                    return (App expr0' (Var newBinding), (newBinding, expr1') : newBindings0 ++ newBindings1)
                 Nothing ->
                     return (App expr0' expr1', newBindings0 ++ newBindings1)
         Lam lamCoreBndr expr -> do
