@@ -272,9 +272,11 @@ transformBodyToCPS dflags originalCoreBndr expr callableFunctions continuation =
                 expr1' <- aux expr1 callableFunctions inTailPosition
                 if hasReplacedCalls then do
                     let newLetBinding = Let (NonRec bndr exprWithBindings) expr1'
+                    let firstCoreBndr = fst $ head newBindings
+                    let caseExprType = getReturnType originalCoreBndr
                     let tailRecExpr = Data.Foldable.foldl'
                             (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
-                            newLetBinding
+                            (Case (Var firstCoreBndr) firstCoreBndr caseExprType [Alt DEFAULT [] newLetBinding])
                             newBindings
                     return tailRecExpr
                 else if isRecursiveCall then do
@@ -303,9 +305,11 @@ transformBodyToCPS dflags originalCoreBndr expr callableFunctions continuation =
             let isRecursiveCall = isCallToAny dflags expr callableFunctionNames
             if hasReplacedCalls then let
                 exprInCase = Case exprWithBindings caseCoreBndr typ altAsCPS
+                firstCoreBndr = fst $ head newBindings
+                caseExprType = getReturnType originalCoreBndr
                 tailRecExpr = Data.Foldable.foldl'
                     (\acc (coreBndr, coreExpr) -> App coreExpr $ Lam coreBndr acc)
-                    exprInCase
+                    (Case (Var firstCoreBndr) firstCoreBndr caseExprType [Alt DEFAULT [] exprInCase])
                     newBindings
                 in return tailRecExpr
             else if isRecursiveCall then do
