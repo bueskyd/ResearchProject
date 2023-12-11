@@ -322,10 +322,10 @@ transformBodyToCPS dflags originalCoreBndr expr callableFunctions continuation =
             else
                 return $ Case expr caseCoreBndr typ altAsCPS
         Cast expr coercion -> do
-            expr' <- aux expr callableFunctions False
+            expr' <- aux expr callableFunctions True
             return $ Cast expr' coercion
         Tick tickish expr -> do
-            expr' <- aux expr callableFunctions False
+            expr' <- aux expr callableFunctions True
             return $ Tick tickish expr'
         Type typ -> return $ Type typ
         Coercion coercion -> return $ Coercion coercion
