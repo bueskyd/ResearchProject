@@ -44,7 +44,7 @@ pass guts = do
         autoCPS :: DynFlags -> CoreBind -> CoreM CoreBind --(CoreBndr, Expr CoreBndr)
         autoCPS dflags bind = do
             do_transform <- case bind of
-                NonRec coreBndr _ -> do
+                NonRec coreBndr expr -> do
                     shouldTransform <- (\anns -> "AUTO_CPS" `elem` anns) <$> (annotationsOn guts coreBndr :: CoreM [String])
                     return $ if shouldTransform then Just $ getCoreBndrNames dflags bind else Nothing
                 Rec lst -> do
@@ -118,8 +118,8 @@ transformTopLevelToCPS dflags bind callableFunctions = case bind of
         transformedBody <- transformBodyToCPS dflags coreBndr simplifiedExpr callableFunctions continuation
         (transformedLocals, bndrMap) <- transformLocalFunctionsToCPS dflags transformedBody callableFunctions
         let funcToAux = Map.fromList bndrMap
-        let recursivecallCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux
-        return $ NonRec coreBndr recursivecallCallsReplaced
+        let afterRecursiveCallsReplaced = replaceRecursiveCalls dflags transformedLocals funcToAux
+        return $ NonRec coreBndr afterRecursiveCallsReplaced 
     Rec lst -> do
         let callableFunctions' = map fst lst ++ callableFunctions
         funcToAux <- mapFunctionsToAux dflags callableFunctions'
@@ -166,6 +166,7 @@ transformFunctionToCPS dflags (coreBndr, expr) callableFunctions = do
         Nothing -> return (coreBndr, expr) -- expr is not a lambda
         Just expr' -> do
             newType <- makeCPSFunTy coreBndr
+            putMsgS $ "CPS-function type: " ++ showSDoc dflags (ppr newType)
             let transformedCoreBndr = setVarType coreBndr newType
             simplifiedExpr <- simplify dflags expr'
             transformedBody <- transformBodyToCPS dflags coreBndr simplifiedExpr callableFunctions (Var continuation)
@@ -528,9 +529,6 @@ mkIdentityFromReturnType coreBndr = do
     tyVarUnique <- getUniqueM
     let returnType = getReturnType coreBndr
     let kind = typeKind returnType
-    --let typeVariable = mkTyVar (mkSystemVarName tyVarUnique (mkFastString "ty")) kind
-    --let tyVarTy = mkTyVarTy typeVariable
-    --let var = mkLocalVar VanillaId varName Many tyVarTy vanillaIdInfo
     let var = mkLocalVar VanillaId varName Many kind vanillaIdInfo
     return $ mkCoreLams [var] (Var var)
 
@@ -546,23 +544,29 @@ wrapCPS (originalCoreBndr, originalExpr) (cpsCoreBndr, cpsExpr) = do
 
 makeContinuationType :: CoreBndr -> CoreM Type
 makeContinuationType coreBndr = do
-    let kind = varType coreBndr
-    let (_, returnType) = splitFunTys kind
-    let kind = typeKind returnType
-    paramTyVarUnique <- getUniqueM
+    let coreBndrKind = varType coreBndr
+    let (_, returnType) = splitFunTys coreBndrKind
+    let returnTypeKind = typeKind returnType
     returnTyVarUnique <- getUniqueM
-    let paramTypeVariable = mkTyVar (mkSystemVarName paramTyVarUnique (mkFastString "paramTy")) kind
-    let returnTypeVariable = mkTyVar (mkSystemVarName returnTyVarUnique (mkFastString "returnTy")) kind
-    let paramTyVarTy = mkTyVarTy paramTypeVariable
+    let returnTypeVariable = mkTyVar (mkSystemVarName returnTyVarUnique (mkFastString "returnTy")) returnTypeKind
     let returnTyVarTy = mkTyVarTy returnTypeVariable
-    return $ mkFunctionType Many paramTyVarTy returnTyVarTy
+    return $ mkFunctionType Many returnType returnTyVarTy
 
 makeCPSFunTy :: CoreBndr -> CoreM Type
 makeCPSFunTy coreBndr = do
     let kind = varType coreBndr
-    let (tyCoBinders, res) = splitPiTys kind
-    let continuationType = mkFunctionType Many res res -- Make type R -> R
-    let continuationResType = mkFunctionType Many continuationType res -- Make type (R -> R) -> R
+    let (tyCoBinders, returnType) = splitPiTys kind -- res is type R
+
+    -- Make generic type a
+    let returnTypeKind = typeKind returnType
+    returnTyVarUnique <- getUniqueM
+    let conReturnTypeVariable = mkTyVar (mkSystemVarName returnTyVarUnique (mkFastString "returnTy")) returnTypeKind
+    let conReturnTyVarTy = mkTyVarTy conReturnTypeVariable
+
+    let continuationType = mkFunctionType Many returnType conReturnTyVarTy -- Make type R -> a
+    let continuationResType = mkFunctionType Many continuationType conReturnTyVarTy -- Make type (R -> a) -> a
+
+    -- Append rest of parameters
     let funcType = mkPiTys tyCoBinders continuationResType
     return funcType
 
