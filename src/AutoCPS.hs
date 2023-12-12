@@ -166,7 +166,6 @@ transformFunctionToCPS dflags (coreBndr, expr) callableFunctions = do
         Nothing -> return (coreBndr, expr) -- expr is not a lambda
         Just expr' -> do
             newType <- makeCPSFunTy coreBndr
-            putMsgS $ "CPS-function type: " ++ showSDoc dflags (ppr newType)
             let transformedCoreBndr = setVarType coreBndr newType
             simplifiedExpr <- simplify dflags expr'
             transformedBody <- transformBodyToCPS dflags coreBndr simplifiedExpr callableFunctions (Var continuation)
