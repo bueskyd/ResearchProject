@@ -17,15 +17,6 @@ import Data.Foldable (find)
 import qualified Data.Map as Map
 import GHC.Utils.Monad (allM)
 
-data PrintOptions = PrintOptions {indentation :: Int, indentationString :: String}
-
-incInden :: PrintOptions -> PrintOptions
-incInden printOptions = PrintOptions (indentation printOptions + 1) (indentationString printOptions)
-
-makeIndentation :: PrintOptions -> String
-makeIndentation printOptions =
-  Control.Monad.join (replicate (indentation printOptions) (indentationString printOptions))
-
 plugin :: Plugin
 plugin =
     defaultPlugin
@@ -40,7 +31,6 @@ pass guts = do
     dflags <- getDynFlags
     bindsOnlyPass (mapM (autoCPS dflags)) guts
     where
-        printOptions = PrintOptions 0 " - "
         autoCPS :: DynFlags -> CoreBind -> CoreM CoreBind --(CoreBndr, Expr CoreBndr)
         autoCPS dflags bind = do
             do_transform <- case bind of
@@ -83,31 +73,6 @@ pass guts = do
                         putMsgS $ showSDoc dflags (ppr cps)
                         return cps
                 Nothing -> return bind
-
-printCaseTypes :: DynFlags -> CoreBind -> CoreM ()
-printCaseTypes dflags bind = case bind of
-    NonRec coreBndr expr -> aux expr
-    Rec lst -> mapM_ (\(coreBndr, expr) -> aux expr) lst
-    where
-        aux expr = case expr of
-            Var id -> return ()
-            Lit lit -> return () 
-            App expr0 expr1 -> do
-                aux expr0
-                aux expr1
-            Lam coreBndr expr -> aux expr
-            Let bind expr -> do
-                case bind of
-                    NonRec localCoreBndr localExpr -> aux localExpr
-                    Rec lst -> mapM_ (\(localCoreBndr, localExpr) -> aux localExpr) lst
-                aux expr
-            Case expr coreBndr typ alts -> do
-                putMsgS $ showSDoc dflags $ ppr typ
-                mapM_ (\(Alt altCon localCoreBndrs localExpr) -> aux localExpr) alts
-            Cast expr coercion -> aux expr
-            Tick tickish expr -> aux expr
-            Type typ -> return ()
-            Coercion coercion -> return ()
 
 transformTopLevelToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
 transformTopLevelToCPS dflags bind callableFunctions = case bind of
@@ -609,28 +574,6 @@ getCoreBndrNames dflags (NonRec coreBndr _) = [getCoreBndrName dflags coreBndr]
 getCoreBndrNames dflags (Rec lst) =
     map (\(coreBndr, _) -> getCoreBndrName dflags coreBndr) lst
 
-(==>) :: Bool -> Bool -> Bool
-(==>) a b = not a || b
-
-infixr 1 ==>
-
-getLocalBndrNames :: DynFlags -> (CoreBndr, Expr CoreBndr) -> [String]
-getLocalBndrNames dflags (coreBndr, expr) = getCoreBndrName dflags coreBndr : getLocalBndrNames' expr where
-    getLocalBndrNames' (Var id) = []
-    getLocalBndrNames' (Lit lit) = []
-    getLocalBndrNames' (App expr0 expr1) = getLocalBndrNames' expr0 ++ getLocalBndrNames' expr1
-    getLocalBndrNames' (Lam coreBndr expr) = []
-    getLocalBndrNames' (Let (NonRec bndr expr0) expr1) =
-        getCoreBndrName dflags bndr : getLocalBndrNames' expr1
-    getLocalBndrNames' (Let (Rec lst) expr) =
-        getLocalBndrNames' expr ++ map (\(localBndrName, _) -> getCoreBndrName dflags localBndrName) lst
-    getLocalBndrNames' (Case expr coreBndr _ alternatives) =
-        getLocalBndrNames' expr ++ (alternatives >>= (\(Alt altCon coreBndrs rhs) -> getLocalBndrNames' rhs))
-    getLocalBndrNames' (Cast expr _) = getLocalBndrNames' expr
-    getLocalBndrNames' (Tick _ expr) = getLocalBndrNames' expr
-    getLocalBndrNames' (Type typ) = []
-    getLocalBndrNames' (Coercion coercion) = []
-
 isTailRecursive :: DynFlags -> CoreBind -> CoreM Bool
 isTailRecursive dflags expr = case expr of
     NonRec coreBndr expr -> isTailRecursive' [getCoreBndrName dflags coreBndr] expr True
@@ -678,24 +621,6 @@ isTailRecursive dflags expr = case expr of
             Type typ -> return True
             Coercion coercion -> return True
 
-containsCallToAny :: DynFlags -> Expr CoreBndr -> [String] -> Bool
-containsCallToAny dflags expr = any (containsCallTo dflags expr)
-
-containsCallTo :: DynFlags -> Expr CoreBndr -> String -> Bool
-containsCallTo dflags (Var id) coreBndrName = coreBndrName == showSDoc dflags (ppr id)
-containsCallTo dflags (Lit lit) coreBndrName = False
-containsCallTo dflags (App expr0 expr1) coreBndrName =
-     containsCallTo dflags expr0 coreBndrName || containsCallTo dflags expr1 coreBndrName
-containsCallTo dflags (Lam coreBndr expr) coreBndrName = containsCallTo dflags expr coreBndrName
-containsCallTo dflags (Let (NonRec bndr expr0) expr1) coreBndrName = containsCallTo dflags expr1 coreBndrName -- expr0 is unused. Do something about it? Maybe?
-containsCallTo dflags (Let (Rec lst) expr) coreBndrName = containsCallTo dflags expr coreBndrName -- lst is unused. Do something about it? Maybe?
-containsCallTo dflags (Case expr coreBndr _ alternatives) coreBndrName =
-     any (\(Alt altCon coreBndrs rhs) -> containsCallTo dflags rhs coreBndrName) alternatives
-containsCallTo dflags (Cast expr _) coreBndrName = containsCallTo dflags expr coreBndrName
-containsCallTo dflags (Tick _ expr) coreBndrName = containsCallTo dflags expr coreBndrName
-containsCallTo dflags (Type typ) coreBndrName = False
-containsCallTo dflags (Coercion coercion) coreBndrName = False
-
 isCallToAnyMaybe :: DynFlags -> CoreExpr -> [CoreBndr] -> Maybe CoreBndr
 isCallToAnyMaybe dflags expr coreBndrs =
     join $
@@ -714,116 +639,3 @@ isCallTo dflags (Var id) coreBndrName = coreBndrName == showSDoc dflags (ppr id)
 isCallTo dflags (App expr0 expr1) coreBndrName = isCallTo dflags expr0 coreBndrName
 isCallTo dflags _ coreBndrName = False
 
-printAbsyns :: DynFlags -> PrintOptions -> [(CoreBndr, Expr CoreBndr)] -> CoreM ()
-printAbsyns dflags printOptions [] = return ()
-printAbsyns dflags printOptions (binding : rest) = do
-    printBinding dflags printOptions binding
-    printAbsyns dflags printOptions rest
-
-printBinding :: DynFlags -> PrintOptions -> (CoreBndr, Expr CoreBndr) -> CoreM ()
-printBinding dflags printOptions (coreBndr, expr) = do
-    putMsgS $ makeIndentation printOptions ++ "Binding: " ++ showSDoc dflags (ppr coreBndr)
-    printAbsyn dflags (incInden printOptions) expr
-
-printLine :: (Outputable a) => DynFlags -> PrintOptions -> String -> a -> CoreM ()
-printLine dflags printOptions str a =
-  putMsgS $ makeIndentation printOptions ++ str ++ showSDoc dflags (ppr a)
-
-printAbsyn :: DynFlags -> PrintOptions -> Expr CoreBndr -> CoreM ()
-printAbsyn dflags printOptions (Var id) =
-    printLine dflags printOptions "Var " id
-printAbsyn dflags printOptions (Lit lit) =
-    printLine dflags printOptions "Lit " lit
-printAbsyn dflags printOptions (App expr0 expr1) = do
-    putMsgS $ makeIndentation printOptions ++ "App"
-    printAbsyn dflags (incInden printOptions) expr0
-    printAbsyn dflags (incInden printOptions) expr1
-printAbsyn dflags printOptions (Lam coreBndr expr) = do
-    printLine dflags printOptions "Lam " coreBndr
-    printAbsyn dflags (incInden printOptions) expr
-printAbsyn dflags printOptions (Let (NonRec bndr expr0) expr1) = do
-    printLine dflags printOptions "Let " bndr
-    printAbsyn dflags (incInden printOptions) expr1
-printAbsyn dflags printOptions (Let (Rec lst) expr1) = do
-    putMsgS $ makeIndentation printOptions ++ "Let rec"
-    printAbsyns dflags (incInden printOptions) lst
-    printAbsyn dflags (incInden printOptions) expr1
-printAbsyn dflags printOptions (Case expr coreBndr _ alternatives) = do
-    printLine dflags printOptions "Case " coreBndr
-    let printAlternatives printOptions [] = return ()
-        printAlternatives printOptions ((Alt altCon coreBndrs rhs) : alts) = do
-            printLine dflags printOptions "Pattern " altCon
-            Data.Foldable.foldl' (\acc e -> printLine dflags printOptions "Bndr " e) (pure ()) coreBndrs
-            printAbsyn dflags (incInden printOptions) rhs
-            printAlternatives printOptions alts
-    printAlternatives (incInden printOptions) alternatives
-    printAbsyn dflags (incInden printOptions) expr
-printAbsyn dflags printOptions (Cast expr _) = do
-    putMsgS $ makeIndentation printOptions ++ "Cast"
-    printAbsyn dflags (incInden printOptions) expr
-printAbsyn dflags printOptions (Tick _ expr) = do
-    putMsgS $ makeIndentation printOptions ++ "Tick"
-    printAbsyn dflags (incInden printOptions) expr
-printAbsyn dflags printOptions (Type typ) =
-    printLine dflags printOptions "Type " typ
-printAbsyn dflags printOptions (Coercion coercion) =
-    printLine dflags printOptions "Coercion " coercion
-
-printRecursive :: (Outputable b) => DynFlags -> [(b, Expr b)] -> CoreM ()
-printRecursive _ [] = return ()
-printRecursive dflags ((b, expr) : rest) = do
-    putMsgS $ "Binding name: " ++ showSDoc dflags (ppr b)
-    maybeName <- getBindingName dflags expr
-    Data.Foldable.forM_ maybeName putMsgS
-
-getBindingName :: (Outputable b) => DynFlags -> Expr b -> CoreM (Maybe String)
-getBindingName dflags (Var id) = return $ Just $ "Variable: " ++ showSDoc dflags (ppr id)
-getBindingName _ (Lit _) = return Nothing
-getBindingName dflags (App expr0 expr1) = do
-    maybeName0 <- getBindingName dflags expr0
-    let name0 = fromMaybe "" maybeName0
-    maybeName1 <- getBindingName dflags expr1
-    let name1 = fromMaybe "" maybeName1
-    return $ Just $ name0 ++ " " ++ name1
-getBindingName dflags (Lam _ expr) = getBindingName dflags expr
-getBindingName dflags (Let _ expr) = getBindingName dflags expr
-getBindingName dflags (Case expr _ _ _) = getBindingName dflags expr
-getBindingName dflags (Cast expr _) = getBindingName dflags expr
-getBindingName dflags (Tick _ expr) = getBindingName dflags expr
-getBindingName dflags (Type _) = return Nothing
-getBindingName dflags (Coercion _) = return Nothing
-
-callsSameFunctionTwice :: Expr a -> CoreM Bool
-callsSameFunctionTwice expr = do
-    names <- collectNames expr []
-    unique names
-    where
-        collectNames (Var id) names = return $ id : names
-        collectNames (Lit _) names = return names
-        collectNames (App expr0 expr1) names = do
-            names0 <- collectNames expr0 names
-            collectNames expr1 names0
-        collectNames (Lam _ expr) names = collectNames expr names
-        collectNames (Let _ expr) names = collectNames expr names
-        collectNames (Case expr _ _ _) names = collectNames expr names
-        collectNames (Cast expr _) names = collectNames expr names
-        collectNames (Tick _ expr) names = collectNames expr names
-        collectNames (Type _) names = return names
-        collectNames (Coercion _) names = return names
-
-unique :: [Id] -> CoreM Bool
-unique [] = return True
-unique (x : xs) = do
-    restUnique <- unique xs
-    isElementIn <- elementIn x xs
-    let notElementIn = not isElementIn
-    return $ notElementIn && restUnique
-
-elementIn :: Id -> [Id] -> CoreM Bool
-elementIn a =
-    Data.Foldable.foldl'
-        (\accIo e -> do
-            acc <- accIo
-            let same = getName a == getName e
-            return $ same || acc)
-        (return False)
