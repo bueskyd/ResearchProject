@@ -1,3 +1,7 @@
 dist-newstyle/
 .vscode/
+bench-lazy.txt
+bench-strict.txt
+perf-lazy.html
+perf-strict.html
 
