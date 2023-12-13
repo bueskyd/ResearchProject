@@ -31,8 +31,10 @@ pass guts = do
     dflags <- getDynFlags
     bindsOnlyPass (mapM (autoCPS dflags)) guts
     where
-        autoCPS :: DynFlags -> CoreBind -> CoreM CoreBind --(CoreBndr, Expr CoreBndr)
+        autoCPS :: DynFlags -> CoreBind -> CoreM CoreBind
         autoCPS dflags bind = do
+
+            --Determine whether function, or set of mutually recursive functions, has the AUTO_CPS annotation.
             do_transform <- case bind of
                 NonRec coreBndr expr -> do
                     shouldTransform <- (\anns -> "AUTO_CPS" `elem` anns) <$> (annotationsOn guts coreBndr :: CoreM [String])
@@ -45,6 +47,7 @@ pass guts = do
                         (return False)
                         lst
                     return $ if shouldTransform then Just $ getCoreBndrNames dflags bind else Nothing
+
             case do_transform of
                 Just names -> do
                     originalIsTailRecursive <- isTailRecursive dflags bind
@@ -72,8 +75,12 @@ pass guts = do
                         putMsgS "Transformed to CPS"
                         putMsgS $ showSDoc dflags (ppr cps)
                         return cps
-                Nothing -> return bind
+                Nothing -> return bind --Return original binding if it does not have the AUTO_CPS annotation
 
+--Transforms a toplevel function to CPS.
+--First parameter: A set of dynamic flags.
+--Second parameter: The function or set of mutually recursive functions to transform.
+--Third parameter: A list of functions that can be called.
 transformTopLevelToCPS :: DynFlags -> CoreBind -> [CoreBndr] -> CoreM CoreBind
 transformTopLevelToCPS dflags bind callableFunctions = case bind of
     NonRec coreBndr expr -> do
@@ -123,19 +130,33 @@ mapFunctionsToAux dflags functions =
         auxFunction <- makeAuxCPSFun dflags func
         return (func, auxFunction)) functions
 
+--Transforms a function to CPS.
+--First parameter: A set of dynamic flags.
+--Second parameter: A pair consisting of a function binding and the associated expression.
+--Third parameter: A list of functions that can be called.
+--Returns a CoreM containing the transformed binding and its body.
 transformFunctionToCPS :: DynFlags -> (CoreBndr, CoreExpr) -> [CoreBndr] -> CoreM (CoreBndr, CoreExpr)
 transformFunctionToCPS dflags (coreBndr, expr) callableFunctions = do
     continuationType <- makeContinuationType coreBndr
     continuation <- makeVar "cont" continuationType
+    --Add the continuation as parameter to the function:
     case prependArg expr continuation of
-        Nothing -> return (coreBndr, expr) -- expr is not a lambda
+        Nothing -> return (coreBndr, expr) -- expr is not a lambda. This should never happen.
         Just expr' -> do
+            --Update the type of the function:
             newType <- makeCPSFunTy coreBndr
             let transformedCoreBndr = setVarType coreBndr newType
+
+            --Simplify and transform:
             simplifiedExpr <- simplify dflags expr'
             transformedBody <- transformBodyToCPS dflags coreBndr simplifiedExpr callableFunctions (Var continuation)
             return (transformedCoreBndr, transformedBody)
 
+--Transforms all local functions to CPS.
+--First parameter: A set of dynamic flags.
+--Second parameter: The body of the toplevel function whose local functions to transform.
+--Third parameter: A list of functions that can be called.
+--Returns a CoreM containing the transformed body and a mapping from old function names to new function names..
 transformLocalFunctionsToCPS :: DynFlags -> CoreExpr -> [CoreBndr] -> CoreM (CoreExpr, [(CoreBndr, CoreBndr)])
 transformLocalFunctionsToCPS dflags expr callableFunctions = case expr of
     Var id -> return (Var id, [])
@@ -185,6 +206,13 @@ transformLocalFunctionsToCPS dflags expr callableFunctions = case expr of
     Type typ -> return (Type typ, [])
     Coercion coercion -> return (Coercion coercion, [])
 
+--Transforms a functioj body to CPS. Does not touch local functions.
+--First parameter: A set of dynamic flags.
+--Second parameter: The name of the function to transform.
+--Third parameter: The body of the function to transform.
+--Fourth parameter: A list of callableFunctions.
+--Fifth parameter: An expression repressionting the continuation.
+--Returns a the transformed of the function.
 transformBodyToCPS :: DynFlags -> CoreBndr -> CoreExpr -> [CoreBndr] -> CoreExpr -> CoreM CoreExpr
 transformBodyToCPS dflags originalCoreBndr expr callableFunctions continuation = aux expr callableFunctions True where
     aux :: CoreExpr -> [CoreBndr] -> Bool -> CoreM CoreExpr
@@ -295,9 +323,14 @@ transformBodyToCPS dflags originalCoreBndr expr callableFunctions continuation =
         Type typ -> return $ Type typ
         Coercion coercion -> return $ Coercion coercion
 
+--Checks whether a binding is a function.
+--First parameter: The binding to check.
+--Returns true if the binding is a function and returns false if it is a function.
 isFunction :: CoreBndr -> Bool
 isFunction = isJust . splitPiTy_maybe . varType
 
+--Simplifies an expression. The purpose of this is to make the transformation process easier.
+--First parameter: A set of dynamic flags.
 simplify :: DynFlags -> CoreExpr -> CoreM CoreExpr
 simplify dflags expr = aux expr return where
     aux :: CoreExpr -> (CoreExpr -> CoreM CoreExpr) -> CoreM CoreExpr
@@ -357,17 +390,13 @@ simplify dflags expr = aux expr return where
         Type typ -> wrapper $ Type typ
         Coercion coercion -> wrapper $ Coercion coercion
 
-indexed :: [a] -> [(Int, a)]
-indexed = zip (iterate (+1) 0)
-
-setAt :: Int -> a -> [a] -> [a]
-setAt index element lst = aux index lst where
-    aux index [] = lst
-    aux index (x : xs)
-        | index == 0 = element : xs
-        | index < 0 = lst
-        | index > 0 = x : aux (index - 1) xs
-
+--Replaces the bindings of certain functions with other bindings.
+--During transformation the signatures of some functions might have changed.
+--The purpose of this function is to ensure consistency of function signatures and corresponding calls.
+--First parameter: A set of dynamic flags.
+--Second parameter: The expression containing bindings that have changed.
+--Third parameter: A mapping from old bindings to new bindings.
+--Returns the second paramter where function bindings have been updated.
 replaceRecursiveCalls :: DynFlags -> CoreExpr -> Map.Map CoreBndr CoreBndr -> CoreExpr
 replaceRecursiveCalls dflags expr funcToAux = aux expr where
     aux expr = case expr of
@@ -477,6 +506,10 @@ replaceNonTailCalls dflags expr callableFunctions inTailPosition = aux expr call
         Type typ -> return (Type typ, [])
         Coercion coercion -> return (Coercion coercion, [])
 
+--Creates a body for the new wrapper function.
+--First parameter: The body of the function before transformation.
+--Second parameter: The binding of the new auxilary auxilary function.
+--Returns the body of a function which calles the new auxilary function.
 makeWrapperFunctionBody :: CoreExpr -> CoreBndr -> CoreM CoreExpr
 makeWrapperFunctionBody originalCoreExpr auxCoreBndr = do
     let (tyBinders, valBinders, _) = collectTyAndValBinders originalCoreExpr
@@ -486,6 +519,8 @@ makeWrapperFunctionBody originalCoreExpr auxCoreBndr = do
     let callToTailRec = Data.Foldable.foldl' App (Var auxCoreBndr) args
     return $ mkCoreLams (tyBinders ++ valBinders) callToTailRec
 
+--Creates the identity function.
+--The paramter is the binding of a function whose return type is used to create the identity function.
 mkIdentityFromReturnType :: CoreBndr -> CoreM CoreExpr
 mkIdentityFromReturnType coreBndr = do
     paramUnique <- getUniqueM
@@ -496,16 +531,8 @@ mkIdentityFromReturnType coreBndr = do
     let var = mkLocalVar VanillaId varName Many kind vanillaIdInfo
     return $ mkCoreLams [var] (Var var)
 
-wrapCPS :: (CoreBndr, CoreExpr) -> (CoreBndr, CoreExpr) -> CoreM CoreExpr
-wrapCPS (originalCoreBndr, originalExpr) (cpsCoreBndr, cpsExpr) = do
-    let (args, _) = collectBinders originalExpr
-    let returnType = getReturnType originalCoreBndr
-    idFun <- mkIdentityFromReturnType originalCoreBndr
-    let argVars = map Var args ++ [idFun]
-    let callToTailRec = mkCoreApps (Var cpsCoreBndr) argVars
-    let letExpression = mkLetRec [(cpsCoreBndr, cpsExpr)] callToTailRec
-    return $ mkCoreLams args letExpression
-
+--Creates the type of a continuation.
+--First parameter is a binding whose return type is used as the parameter type of the continuation.
 makeContinuationType :: CoreBndr -> CoreM Type
 makeContinuationType coreBndr = do
     let coreBndrKind = varType coreBndr
@@ -516,6 +543,9 @@ makeContinuationType coreBndr = do
     let returnTyVarTy = mkTyVarTy returnTypeVariable
     return $ mkFunctionType Many returnType returnTyVarTy
 
+--Creates the type of a function converted to CPS.
+--The first parameter is the binding of the function before transformation.
+--The return type is used to create the type of the continuation parameter.
 makeCPSFunTy :: CoreBndr -> CoreM Type
 makeCPSFunTy coreBndr = do
     let kind = varType coreBndr
@@ -534,6 +564,7 @@ makeCPSFunTy coreBndr = do
     let funcType = mkPiTys tyCoBinders continuationResType
     return funcType
 
+--Prepends "Aux" to a function name.
 makeAuxCPSFun :: DynFlags -> CoreBndr -> CoreM CoreBndr
 makeAuxCPSFun dflags coreBndr = do
     let coreBndrName = getCoreBndrName dflags coreBndr
@@ -541,12 +572,14 @@ makeAuxCPSFun dflags coreBndr = do
     localFunTy <- makeCPSFunTy coreBndr
     makeVar localCoreBndrName localFunTy
 
+--Get the return type of a function.
 getReturnType :: CoreBndr -> Type
 getReturnType coreBndr = let
     kind = varType coreBndr
     (_, returnType) = splitFunTys kind
     in returnType
 
+--Prepends inserts a new lambda into a sequence of lambdas. Returns nothing of this is not possible.
 prependArg :: CoreExpr -> Var -> Maybe CoreExpr
 prependArg expr var = aux expr where
     aux expr = case expr of
@@ -554,6 +587,7 @@ prependArg expr var = aux expr where
         Lam coreBndr expr -> Just $ Lam coreBndr (Lam var expr)
         _ -> Nothing
 
+--Creates a variable with a specific name and type.
 makeVar :: String -> Type -> CoreM Var
 makeVar name typ = do
     unique <- getUniqueM
@@ -561,19 +595,23 @@ makeVar name typ = do
     let var = mkLocalVar VanillaId varName Many typ vanillaIdInfo
     return var
 
+--Returns the annotations on a binding.
 annotationsOn :: (Data a) => ModGuts -> CoreBndr -> CoreM [a]
 annotationsOn guts bndr = do
     (_, anns) <- getAnnotations deserializeWithData guts
     return $ lookupWithDefaultUFM anns [] (varName bndr)
 
+--Get the name of a binding.
 getCoreBndrName :: DynFlags -> CoreBndr -> String
 getCoreBndrName dflags coreBndr = showSDoc dflags (ppr coreBndr)
 
+--Get all the names in a binding. This includes the names of mutually recursive functions.
 getCoreBndrNames :: DynFlags -> CoreBind -> [String]
 getCoreBndrNames dflags (NonRec coreBndr _) = [getCoreBndrName dflags coreBndr]
 getCoreBndrNames dflags (Rec lst) =
     map (\(coreBndr, _) -> getCoreBndrName dflags coreBndr) lst
 
+--Returns true of a function is tail-recursive, otherwise false.
 isTailRecursive :: DynFlags -> CoreBind -> CoreM Bool
 isTailRecursive dflags expr = case expr of
     NonRec coreBndr expr -> isTailRecursive' [getCoreBndrName dflags coreBndr] expr True
@@ -621,6 +659,11 @@ isTailRecursive dflags expr = case expr of
             Type typ -> return True
             Coercion coercion -> return True
 
+--Checks if an expression is a call to any of the specified functions.
+--First parameter: A set of dynamic flags.
+--Second parameter: The expression to check.
+--Third parameter: A list of functions to check for.
+--Returns Some coreBndr if expression is a call to coreBndr, otherwise Nothing.
 isCallToAnyMaybe :: DynFlags -> CoreExpr -> [CoreBndr] -> Maybe CoreBndr
 isCallToAnyMaybe dflags expr coreBndrs =
     join $
@@ -631,9 +674,11 @@ isCallToAnyMaybe dflags expr coreBndrs =
             else Nothing)
         coreBndrs
 
+--Same as isCallToAnyMaybe except it does not return the binding of the function called.
 isCallToAny :: DynFlags -> CoreExpr -> [String] -> Bool
 isCallToAny dflags expr = any (isCallTo dflags expr)
 
+--Same as isCallToAny except it only checks for a specific function.
 isCallTo :: DynFlags -> CoreExpr -> String -> Bool
 isCallTo dflags (Var id) coreBndrName = coreBndrName == showSDoc dflags (ppr id)
 isCallTo dflags (App expr0 expr1) coreBndrName = isCallTo dflags expr0 coreBndrName
