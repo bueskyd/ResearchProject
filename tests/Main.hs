@@ -82,7 +82,7 @@ recCallInCase2C :: Int -> Int
 recCallInCase2C n = recCallInCaseC2Aux n id
 
 {-# ANN recCallInCaseC2Aux "AUTO_CPS" #-}
-ecCallInCaseC2Aux :: Int -> (Int -> Int) -> Int
+recCallInCaseC2Aux :: Int -> (Int -> Int) -> Int
 recCallInCaseC2Aux n c =
     recCallInCaseC2Aux n (\x -> case x + 1 of
         0 -> c 1
