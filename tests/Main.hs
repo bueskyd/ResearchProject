@@ -5,30 +5,6 @@ import Test.QuickCheck
 
 main :: IO ()
 main = find_breaking_point fibonnaci (+ 1) show 0
-    --print $ meme 7
-    --mapM_ (print . fib) $ take 10 $ iterate (1+) 0
-    --print $ bar 10
-    --print $ caseInApp2C 7
-    {-print $ caseInAppInCaseInApp 7 4
-    print $ caseInAppInCaseInApp 13 3
-    print $ caseInAppInCaseInApp 6 12
-    print $ caseInAppInCaseInApp 9 43-}
-    --mapM_ (\n -> print $ mutuallyRecursive0 n == mutuallyRecursive0C n) $ take 10 $ iterate (+1) 0
-    --mapM_ (putStrLn . iHaveNoIdeaWhatToCallThis) $ take 10 $ iterate (+1) 0
-    --mapM_ (print . nonRecWithLocalRec) $ take 10 $ iterate (+1) 0
-    --test
-    --mapM_ print (reverse_lst [1,2,3,4,5,6,7,8,9,0])
-    --print $ fourthLetBindingTest 1
-    {-mapM_ (\n -> do
-        let a = matchOnRecCase n
-        let b = matchOnRecCase1 n
-        let equal = a == b
-        print $ (show a) ++ " " ++ (show b) ++ " " ++ show equal) $ take 10 $ iterate (+1) 0-}
-    {-mapM_ (\n -> do
-        let a = matchOnLet n
-        let b = matchOnLet1 n
-        let equal = a == b
-        print $ (show a) ++ " " ++ (show b) ++ " " ++ show equal) $ take 10 $ iterate (+1) 0-}
 
 {-
 Factorial
@@ -41,14 +17,14 @@ Ackermann function
 Sum of elements in list
 -}
 
---{-# ANN mutuallyTailRec0 "AUTO_CPS" #-}
+{-# ANN mutuallyTailRec0 "AUTO_CPS" #-}
 mutuallyTailRec0 :: Int -> Int
 mutuallyTailRec0 n = mutuallyTailRec1 (n - 1)
 
 mutuallyTailRec1 :: Int -> Int
 mutuallyTailRec1 n = mutuallyTailRec0 (n - 1)
 
---{-# ANN matchOnLet "AUTO_CPS" #-}
+{-# ANN matchOnLet "AUTO_CPS" #-}
 matchOnLet :: Int -> Int
 matchOnLet n = case let a = n * n in a * a of
     0 -> 0
@@ -59,7 +35,7 @@ matchOnLet1 n = case let a = n * n in a * a of
     0 -> 0
     _ -> 1 + matchOnLet1 (n - 1)
 
---{-# ANN matchOnRecCase "AUTO_CPS" #-}
+{-# ANN matchOnRecCase "AUTO_CPS" #-}
 matchOnRecCase :: Int -> Int
 matchOnRecCase n = case case n of
     0 -> 0
@@ -74,7 +50,7 @@ matchOnRecCase1 n = case case n of
     0 -> 0
     _ -> 1 + matchOnRecCase1 (n - 1)
 
---{-# ANN matchOnCase "AUTO_CPS" #-}
+{-# ANN matchOnCase "AUTO_CPS" #-}
 matchOnCase :: Int -> Int
 matchOnCase n = case case n of
     0 -> 0
@@ -90,13 +66,13 @@ matchOnCaseC n = aux n id where
         0 -> c 0
         _ -> aux (n - 1) (\x -> c (x + 1))
 
---{-# ANN aaa "AUTO_CPS" #-}
+{-# ANN aaa "AUTO_CPS" #-}
 aaa :: Int -> Int
 aaa n = case n of
     0 -> aaa (n - 1)
     _ -> 9
 
---{-# ANN recCallInCase2 "AUTO_CPS" #-}
+{-# ANN recCallInCase2 "AUTO_CPS" #-}
 recCallInCase2 :: Int -> Int
 recCallInCase2 n = case recCallInCase2 n + 1 of
     0 -> 1
@@ -105,14 +81,14 @@ recCallInCase2 n = case recCallInCase2 n + 1 of
 recCallInCase2C :: Int -> Int
 recCallInCase2C n = recCallInCaseC2Aux n id
 
---{-# ANN recCallInCaseC2Aux "AUTO_CPS" #-}
-recCallInCaseC2Aux :: Int -> (Int -> Int) -> Int
+{-# ANN recCallInCaseC2Aux "AUTO_CPS" #-}
+ecCallInCaseC2Aux :: Int -> (Int -> Int) -> Int
 recCallInCaseC2Aux n c =
     recCallInCaseC2Aux n (\x -> case x + 1 of
         0 -> c 1
         _ -> c n)
 
---{-# ANN recCallInCase "AUTO_CPS" #-}
+{-# ANN recCallInCase "AUTO_CPS" #-}
 recCallInCase :: Int -> Int
 recCallInCase n = case recCallInCase n of
     0 -> 1
@@ -127,13 +103,13 @@ recCallInCaseCAux n c =
         0 -> c 1
         _ -> c n)
 
---{-# ANN expressionInCase "AUTO_CPS" #-}
+{-# ANN expressionInCase "AUTO_CPS" #-}
 expressionInCase :: Int -> Int
 expressionInCase n = case n < 4 of
     True -> expressionInCase 0
     False -> expressionInCase 1
 
---{-# ANN innerCallsOuter "AUTO_CPS" #-}
+{-# ANN innerCallsOuter "AUTO_CPS" #-}
 innerCallsOuter :: Int -> Int
 innerCallsOuter n = inner n where
     inner n = outerCalledByInner n
@@ -148,13 +124,13 @@ innerCallsOuterC n = inner n where
 outerCalledByInnerC :: Int -> Int
 outerCalledByInnerC n = innerCallsOuterC n
 
---{-# ANN nonRecWithLocalRec "AUTO_CPS" #-}
+{-# ANN nonRecWithLocalRec "AUTO_CPS" #-}
 nonRecWithLocalRec :: Int -> Int
 nonRecWithLocalRec n = aux n where
     aux 0 = 0
     aux n = 1 + aux (n - 1)
 
---{-# ANN mutuallyRecursive0 "AUTO_CPS" #-}
+{-# ANN mutuallyRecursive0 "AUTO_CPS" #-}
 mutuallyRecursive0 :: Int -> Int
 mutuallyRecursive0 0 = 0
 mutuallyRecursive0 n = mutuallyRecursive1 (n - 1) + 1
@@ -163,7 +139,7 @@ mutuallyRecursive1 :: Int -> Int
 mutuallyRecursive1 0 = 1
 mutuallyRecursive1 n = mutuallyRecursive0 (n - 1) + 1
 
---{-# ANN mutuallyRecursive0C "AUTO_CPS" #-}
+{-# ANN mutuallyRecursive0C "AUTO_CPS" #-}
 mutuallyRecursive0C :: Int -> Int
 mutuallyRecursive0C n = mutuallyRecursive0CAux n id
 
@@ -178,7 +154,7 @@ mutuallyRecursive1CAux n c = case n of
     0 -> c 1
     _ -> mutuallyRecursive0CAux (n - 1) (\x -> c (x + 1))
 
---{-# ANN iHaveNoIdeaWhatToCallThis "AUTO_CPS" #-}
+{-# ANN iHaveNoIdeaWhatToCallThis "AUTO_CPS" #-}
 iHaveNoIdeaWhatToCallThis :: Int -> String
 iHaveNoIdeaWhatToCallThis 0 = "0"
 iHaveNoIdeaWhatToCallThis n = show (ohLookAnotherFunction (show (n - 1)))
@@ -186,7 +162,7 @@ iHaveNoIdeaWhatToCallThis n = show (ohLookAnotherFunction (show (n - 1)))
 ohLookAnotherFunction :: String -> Int
 ohLookAnotherFunction str = length (iHaveNoIdeaWhatToCallThis 0)
 
---{-# ANN doubleNestedLetNonRecBinding "AUTO_CPS" #-}
+{-# ANN doubleNestedLetNonRecBinding "AUTO_CPS" #-}
 doubleNestedLetNonRecBinding :: Int -> Int
 doubleNestedLetNonRecBinding n = case n of
     0 -> 0
@@ -196,7 +172,7 @@ doubleNestedLetNonRecBinding n = case n of
             in doubleNestedLetNonRecBinding (b + b)
         in a + a
 
---{-# ANN doubleNestedLetRecBinding "AUTO_CPS" #-}
+{-# ANN doubleNestedLetRecBinding "AUTO_CPS" #-}
 doubleNestedLetRecBinding :: Int -> Int
 doubleNestedLetRecBinding n = case n of
     0 -> 0
@@ -210,7 +186,7 @@ doubleNestedLetRecBinding n = case n of
                 in f (g a)
         in doubleNestedLetRecBinding (n - 1) + f (n - 1)
 
---{-# ANN nonRecLetBindingTest "AUTO_CPS" #-}
+{-# ANN nonRecLetBindingTest "AUTO_CPS" #-}
 nonRecLetBindingTest :: Int -> Int -> Int
 nonRecLetBindingTest n m = case n of
     0 -> m
@@ -218,7 +194,7 @@ nonRecLetBindingTest n m = case n of
         a = n - 1
         in nonRecLetBindingTest a a
 
---{-# ANN appPlusToLetBinding "AUTO_CPS" #-}
+{-# ANN appPlusToLetBinding "AUTO_CPS" #-}
 appPlusToLetBinding :: Int -> Int
 appPlusToLetBinding n = case n of
     0 -> 0
@@ -226,7 +202,7 @@ appPlusToLetBinding n = case n of
         a = appPlusToLetBinding (n - 1)
         in a * a
 
---{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
+{-# ANN fourthLetBindingTest "AUTO_CPS" #-}
 fourthLetBindingTest :: Int -> Int
 fourthLetBindingTest n = case n of
     0 -> 0
@@ -251,7 +227,7 @@ fourthLetBindingTestC n c = case n of
             _ -> f (n - 1) (\x -> k (x + n))
         in f a (\x -> fourthLetBindingTestC (n - 1) (\y -> c (a + b + b * y + x * x)))
 
---{-# ANN thirdLetBindingTest "AUTO_CPS" #-}
+{-# ANN thirdLetBindingTest "AUTO_CPS" #-}
 thirdLetBindingTest :: Int -> Int
 thirdLetBindingTest n = case n of
     0 -> 0
@@ -260,7 +236,7 @@ thirdLetBindingTest n = case n of
         a = n * n
         in a + b + b * thirdLetBindingTest (n - 1)
 
---{-# ANN anotherLetBindingTest "AUTO_CPS" #-}
+{-# ANN anotherLetBindingTest "AUTO_CPS" #-}
 anotherLetBindingTest :: Int -> Int -> Int
 anotherLetBindingTest n m = case n of
     0 -> m
@@ -272,7 +248,7 @@ anotherLetBindingTest n m = case n of
         b = f n
         in a + b
 
---{-# ANN letBindingTest "AUTO_CPS" #-}
+{-# ANN letBindingTest "AUTO_CPS" #-}
 letBindingTest :: Int -> Int -> Int
 letBindingTest n m = case n of
     0 -> m
@@ -288,7 +264,7 @@ letBindingTestCAux n m c = case n of
     0 -> c m
     _ -> letBindingTestCAux (n - 1) (m - 1) (\a -> a + a)
 
---{-# ANN generic "AUTO_CPS" #-}
+{-# ANN generic "AUTO_CPS" #-}
 generic :: a -> b
 generic a = generic a
 
@@ -305,7 +281,7 @@ caseInAppC n = aux n id where
         0 -> c 1
         n -> aux (n - 1) (\x -> c (x + 1))-}
 
---{-# ANN caseInApp2 "AUTO_CPS" #-}
+{-# ANN caseInApp2 "AUTO_CPS" #-}
 caseInApp2 :: Int -> Int
 caseInApp2 n = 1 + case n of
     0 -> 0
@@ -317,7 +293,7 @@ caseInApp2C n = aux n id where
         0 -> c 1
         n -> aux (n - 1) (\x -> c (1 + x))
 
---{-# ANN caseInAppInCaseInApp "AUTO_CPS" #-}
+{-# ANN caseInAppInCaseInApp "AUTO_CPS" #-}
 caseInAppInCaseInApp :: Int -> Int -> Int
 caseInAppInCaseInApp n m = 1 + case n of
     0 -> 0
@@ -325,7 +301,7 @@ caseInAppInCaseInApp n m = 1 + case n of
         0 -> 0
         m -> caseInAppInCaseInApp (n - 1) (m - 1)
 
---{-# ANN caseInAppInCaseInApp2 "AUTO_CPS" #-}
+{-# ANN caseInAppInCaseInApp2 "AUTO_CPS" #-}
 caseInAppInCaseInApp2 :: Int -> Int -> Int
 caseInAppInCaseInApp2 n m = case n of
     0 -> 1
@@ -336,16 +312,16 @@ caseInAppInCaseInApp2 n m = case n of
 --manyArgs :: Int -> Float -> Bool -> String -> Bool
 --manyArgs n f b s = False
 
---{-# ANN foo "AUTO_CPS" #-}
+{-# ANN foo "AUTO_CPS" #-}
 foo :: Int -> Int -> Int
 foo a b = a + b + foo (a - 1) (b - 1)
 
---{-# ANN bar "AUTO_CPS" #-}
+{-# ANN bar "AUTO_CPS" #-}
 bar :: Int -> Int
 bar 0 = 0
 bar n = n + bar (n - 1)
 
---{-# ANN fib "AUTO_CPS" #-}
+{-# ANN fib "AUTO_CPS" #-}
 fib :: Int -> Int
 fib 0 = 0
 fib 1 = 1
@@ -356,81 +332,3 @@ fibC n = aux n id where
     aux 0 c = c 0
     aux 1 c = c 1
     aux n c = aux (n - 1) (\x -> aux (n - 2) (\y -> c (x + y)))
-
---{-# ANN meme "AUTO_CPS" #-}
-meme :: Int -> Int
-meme n = if n <= 0 then 0 else (meme (meme (n - 1))) - 1
-
-{-memeC :: Int -> Int
-memeC n = aux n id where
-    aux n c =
-        if n <= 0 then
-            c 0
-        else
-            aux (n - 1) (\x -> aux x (\y -> c (y - 1)))-}
-
-{-barA :: Int -> Int-> Int
-barA 0 acc = acc
-barA n acc = barA (n - 1) (acc + n)-}
-
-{-barT :: Int -> Int
-barT n = aux n id
-    where
-        aux 0 c = c 0
-        aux n c = aux (n - 1) (\x -> c $ n + x)-}
-        
-{-baz :: Int -> Int -> Float
-baz 0 _ = 0.0
-baz _ 0 = 0.0
-baz a b = baz (a - 1) (b - 2) + 1.0-}
-
-{-tailRec0 :: Int -> Int
-tailRec0 0 = 0
-tailRec0 1 = 1
-tailRec0 n = tailRec1 (n - 1)
-
-tailRec1 :: Int -> Int
-tailRec1 0 = 0
-tailRec1 1 = 1
-tailRec1 n = tailRec0 (n - 2)
-
-{-# ANN foo "AUTO_CPS" #-}
-{-# ANN tailRec0 "AUTO_CPS" #-}
-{-# ANN tailRec1 "AUTO_CPS" #-}
-shouldNotBeTailRec0 :: Int -> Int
-shouldNotBeTailRec0 0 = 0
-shouldNotBeTailRec0 n = shouldNotBeTailRec0 (aux n)
-    where
-        aux 0 = 0
-        aux n = aux (n - 1) - 1
-
-shouldNotBeTailRec1 :: Int -> Int
-shouldNotBeTailRec1 0 = 0
-shouldNotBeTailRec1 n = shouldNotBeTailRec1 (n - 1) - 1
-
-shouldBeTailRec0 :: Int -> Int
-shouldBeTailRec0 n = shouldBeTailRec0 n where
-    shouldBeTailRec0 0 = 0
-    shouldBeTailRec0 n = shouldBeTailRec0 (n - 1)
-    
-letInLet :: Int -> Int
-letInLet n = let
-    x = let
-        y = 8
-        in y
-    in x
-
-letInIn :: Int -> Int
-letInIn n = let
-    x = 7
-    in
-        let
-            y = 3
-            in y
-
-doubleLet :: Int -> Int
-doubleLet n = let
-    x = 7
-    y = 8
-    in x + y
--}
