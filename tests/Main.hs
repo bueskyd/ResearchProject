@@ -4,7 +4,7 @@ import CPSTests (correctness_check, performance_check, single, find_breaking_poi
 import Test.QuickCheck
 
 main :: IO ()
-main = find_breaking_point fibonnaci (+ 1) show 0
+main = correctness_check
 
 {-
 Factorial
